@@ -1,0 +1,40 @@
+name: Docs Check
+
+on:
+  pull_request:
+    paths:
+      - "AGENTS.md"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - ".codex/**"
+      - ".github/pull_request_template.md"
+      - "docs/**"
+      - "scripts/check-governance.sh"
+      - "scripts/codex/session_start_context.sh"
+  push:
+    branches:
+      - main
+    paths:
+      - "AGENTS.md"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - ".codex/**"
+      - ".github/pull_request_template.md"
+      - "docs/**"
+      - "scripts/check-governance.sh"
+      - "scripts/codex/session_start_context.sh"
+
+jobs:
+  governance-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare scripts
+        run: chmod +x scripts/check-governance.sh
+
+      - name: Governance check
+        run: bash scripts/check-governance.sh

@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  validate-bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare scripts
+        run: chmod +x scripts/check-governance.sh scripts/check-no-secrets.sh scripts/validate.sh scripts/codex/session_start_context.sh
+
+      - name: Validate
+        run: bash scripts/validate.sh

@@ -1,0 +1,48 @@
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Node / web
+node_modules/
+.next/
+dist/
+coverage/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Go
+bin/
+*.test
+coverage.out
+
+# Rust
+target/
+Cargo.lock
+
+# Android / Kotlin
+.gradle/
+local.properties
+*.apk
+*.aab
+
+# Apple / Swift
+DerivedData/
+*.xcworkspace/
+*.xcuserstate
+*.xcuserdata/
+
+# Secrets and env
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs and temp
+*.log
+tmp/
+.tmp/

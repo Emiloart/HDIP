@@ -1,0 +1,20 @@
+name: Security Check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  heuristic-secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare scripts
+        run: chmod +x scripts/check-no-secrets.sh
+
+      - name: Run secret scan
+        run: bash scripts/check-no-secrets.sh
