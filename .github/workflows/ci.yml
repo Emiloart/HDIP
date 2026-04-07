@@ -13,8 +13,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.1
+          components: rustfmt, clippy
+
+      - name: Install Node dependencies
+        run: npm ci
+
       - name: Prepare scripts
-        run: chmod +x scripts/check-governance.sh scripts/check-no-secrets.sh scripts/validate.sh scripts/codex/session_start_context.sh
+        run: chmod +x scripts/check-governance.sh scripts/check-no-secrets.sh scripts/toolchain-env.sh scripts/validate-rust.sh scripts/validate-go.sh scripts/validate-web.sh scripts/validate.sh scripts/codex/session_start_context.sh
 
       - name: Validate
         run: bash scripts/validate.sh

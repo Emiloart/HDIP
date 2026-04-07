@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hdip.dev/schemas/issuer/issuer-profile.schema.json",
+  "title": "IssuerProfile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issuerId",
+    "displayName",
+    "endpoint",
+    "supportedCredentialTemplates"
+  ],
+  "properties": {
+    "issuerId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "endpoint": {
+      "type": "string",
+      "format": "uri"
+    },
+    "supportedCredentialTemplates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

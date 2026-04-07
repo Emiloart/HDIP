@@ -1,0 +1,8 @@
+go 1.26
+
+use (
+	./packages/go/foundation
+	./services/issuer-api
+	./services/trust-registry
+	./services/verifier-api
+)

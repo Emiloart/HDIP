@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hdip.dev/schemas/verifier/verifier-policy-request.schema.json",
+  "title": "VerifierPolicyRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "requestId",
+    "purpose",
+    "requiredPredicates"
+  ],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiredPredicates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

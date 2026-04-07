@@ -1,6 +1,6 @@
 # 0001 Governance And Foundation Bootstrap
 
-- Status: active
+- Status: completed
 - Date: 2026-04-06
 - Owners: repository maintainer
 

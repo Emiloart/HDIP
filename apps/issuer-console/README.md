@@ -1,4 +1,6 @@
 # Issuer Console
+Next.js shell for issuer-facing operator workflows.
 
-Administrative surface for institutions issuing credentials.
-This app should configure and observe issuance flows, not own signing logic.
+Local run:
+
+`npm run dev --workspace @hdip/issuer-console`

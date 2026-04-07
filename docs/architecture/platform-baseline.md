@@ -79,9 +79,10 @@ Governance spine, architecture baseline, repo structure, and validation bootstra
 Foundation implementation for:
 
 - repo workspaces and toolchains
-- Rust crypto core skeleton
-- one or two core Go services
-- public site and developer portal skeleton
+- Rust `crypto-core` and `identity-core` skeletons
+- Go `issuer-api`, `verifier-api`, and `trust-registry` skeletons
+- Next.js `issuer-console` and `verifier-console` shells
+- shared package boundaries under `packages/`
 - initial schemas and contract directories
 
 ### Phase 2
@@ -110,3 +111,5 @@ Wallet and proof flows:
 - production cluster manifests
 - optional chain anchoring
 - advanced reputation graph implementation
+- passkey auth and wallet flows
+- real credential issuance or verification logic

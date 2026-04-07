@@ -1,4 +1,6 @@
 # Verifier Console
+Next.js shell for verifier-facing operator workflows.
 
-Control surface for relying parties requesting and validating credential presentations.
-Verifier policy definition belongs here; proof verification authority does not.
+Local run:
+
+`npm run dev --workspace @hdip/verifier-console`

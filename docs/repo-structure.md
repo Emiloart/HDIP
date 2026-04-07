@@ -7,8 +7,8 @@ If the repository structure changes, this file must be updated in the same chang
 
 ## Current state
 
-The repository is in foundation bootstrap.
-Most directories are structural placeholders that reserve boundaries before product code lands.
+The repository is in foundation scaffolding.
+Governance is in place and the first executable baseline is limited to Slice A foundation code.
 
 ## Ownership model
 
@@ -36,11 +36,16 @@ The intended long-term responsibility split is:
 - `docs/`: governance, plans, ADRs, threat models, standards, privacy, and architecture docs
 - `scripts/`: repo-local automation used by contributors, CI, and Codex hooks
 
-## Planned web surfaces
+## Web surfaces
 
-- `apps/public-site/`
+Foundation slice:
+
 - `apps/issuer-console/`
 - `apps/verifier-console/`
+
+Reserved for later slices:
+
+- `apps/public-site/`
 - `apps/org-admin-console/`
 - `apps/developer-portal/`
 
@@ -54,13 +59,20 @@ They must not become the system of record for wallet custody, cryptographic veri
 
 These are expected to be native applications with a shared Rust credential and crypto core.
 
-## Planned backend service boundaries
+## Backend service boundaries
+
+Foundation slice:
+
+- `services/issuer-api/`
+- `services/verifier-api/`
+- `services/trust-registry/`
+
+Reserved for later slices:
 
 - `services/identity/`
 - `services/credential-issuance/`
 - `services/presentation/`
 - `services/verification/`
-- `services/trust-registry/`
 - `services/identifier-resolution/`
 - `services/credential-status/`
 - `services/consent-delegation/`
@@ -72,9 +84,16 @@ These are expected to be native applications with a shared Rust credential and c
 
 Services are expected to be implemented primarily in Go with explicit contracts and isolated trust boundaries.
 
-## Planned security-critical core
+## Security-critical core
 
-- `crates/hdip-crypto-core/`
+Foundation slice:
+
+- `crates/crypto-core/`
+- `crates/identity-core/`
+
+Deferred unless justified by a later ADR:
+
+- `crates/policy-core/`
 
 This area exists for Rust implementations of key handling, proof generation, credential parsing, verification primitives, and other security-sensitive logic that should remain isolated from transport and UI glue.
 
@@ -82,7 +101,7 @@ This area exists for Rust implementations of key handling, proof generation, cre
 
 Allowed high-level directions:
 
-- `apps/` -> `packages/`, external service APIs
+- `apps/` -> `packages/`, `schemas/`, external service APIs
 - `mobile/` -> `crates/` via native bindings, backend APIs
 - `services/` -> `crates/`, `schemas/`, selected `packages/` only where language/tooling allows
 - `infra/` -> may reference service names and deployment artifacts, but not own product behavior
@@ -98,6 +117,16 @@ Forbidden directions:
 - `services/` must not depend on app directories.
 - `infra/` must not silently redefine trust logic that belongs in services, policies, or standards docs.
 - `schemas/` must not contain service-specific hidden behavior.
+
+## Shared package ownership
+
+Foundation slice shared packages:
+
+- `packages/ui/` for React UI primitives and layout shell pieces
+- `packages/api-client/` for typed frontend API boundaries and error helpers
+- `packages/config-typescript/` for shared TypeScript configuration
+
+Do not put Go or Rust business logic in `packages/`.
 
 ## Local AGENTS guidance
 

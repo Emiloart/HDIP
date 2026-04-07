@@ -1,4 +1,7 @@
 # Trust Registry Service
 
-Issuer, verifier, schema, and trust metadata management.
-Trust policy changes here are architecture-sensitive and require discipline.
+Go service skeleton for trust metadata APIs.
+
+Local run:
+
+`source ../../scripts/toolchain-env.sh && go run ./cmd/trust-registry`
