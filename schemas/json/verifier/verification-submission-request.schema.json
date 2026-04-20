@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hdip.dev/schemas/verifier/verification-submission-request.schema.json",
+  "title": "VerificationSubmissionRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "policyId",
+    "signedCredential"
+  ],
+  "properties": {
+    "policyId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "credentialId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "signedCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "mediaType",
+        "value"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "const": "sd_jwt_vc"
+        },
+        "mediaType": {
+          "type": "string",
+          "const": "application/vc+sd-jwt"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

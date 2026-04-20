@@ -17,3 +17,9 @@ The foundation slice currently enforces example-based parity for:
 - verifier policy request
 - verifier result
 - credential template metadata
+- Phase 1 issuance request and response
+- Phase 1 credential record and credential status
+- Phase 1 verification submission request and verification result
+- Phase 1 audit record
+
+Stub metadata contracts remain separate from the future real Phase 1 write and read contracts.

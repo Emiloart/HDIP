@@ -1,0 +1,14 @@
+{
+  "templateId": "hdip-passport-basic",
+  "issuerId": "did:web:issuer.hdip.dev",
+  "subjectReference": "subject_ref_alex_example",
+  "claims": {
+    "fullLegalName": "Alex Example",
+    "dateOfBirth": "1990-01-01",
+    "countryOfResidence": "MA",
+    "documentCountry": "MA",
+    "kycLevel": "basic",
+    "verifiedAt": "2026-04-20T09:00:00Z",
+    "expiresAt": "2027-04-20T09:00:00Z"
+  }
+}

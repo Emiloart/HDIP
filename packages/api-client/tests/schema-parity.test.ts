@@ -3,10 +3,17 @@ import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  auditRecordSchema,
+  credentialRecordSchema,
+  credentialStatusSchema,
   credentialTemplateMetadataSchema,
   errorEnvelopeSchema,
   healthResponseSchema,
+  issuanceRequestSchema,
+  issuanceResponseSchema,
   issuerProfileSchema,
+  verificationResultSchema,
+  verificationSubmissionRequestSchema,
   verifierPolicyRequestSchema,
   verifierResultSchema,
 } from "../src/schemas";
@@ -17,7 +24,14 @@ type ContractName =
   | "issuerProfile"
   | "verifierPolicyRequest"
   | "verifierResult"
-  | "credentialTemplateMetadata";
+  | "credentialTemplateMetadata"
+  | "issuanceRequest"
+  | "issuanceResponse"
+  | "credentialRecord"
+  | "credentialStatus"
+  | "verificationSubmissionRequest"
+  | "verificationResult"
+  | "auditRecord";
 
 type ManifestEntry = {
   contract: ContractName;
@@ -41,6 +55,13 @@ const contractSchemas = {
   verifierPolicyRequest: verifierPolicyRequestSchema,
   verifierResult: verifierResultSchema,
   credentialTemplateMetadata: credentialTemplateMetadataSchema,
+  issuanceRequest: issuanceRequestSchema,
+  issuanceResponse: issuanceResponseSchema,
+  credentialRecord: credentialRecordSchema,
+  credentialStatus: credentialStatusSchema,
+  verificationSubmissionRequest: verificationSubmissionRequestSchema,
+  verificationResult: verificationResultSchema,
+  auditRecord: auditRecordSchema,
 } as const;
 
 describe("schema parity", () => {

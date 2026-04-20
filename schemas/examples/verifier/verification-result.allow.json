@@ -1,0 +1,13 @@
+{
+  "verificationId": "verification_hdip_001",
+  "credentialId": "cred_hdip_passport_basic_001",
+  "issuerId": "did:web:issuer.hdip.dev",
+  "decision": "allow",
+  "reasonCodes": [
+    "issuer_trusted",
+    "credential_status_active",
+    "template_match"
+  ],
+  "evaluatedAt": "2026-04-20T09:05:00Z",
+  "credentialStatus": "active"
+}

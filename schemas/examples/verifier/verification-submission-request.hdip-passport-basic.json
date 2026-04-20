@@ -1,0 +1,9 @@
+{
+  "policyId": "kyc-passport-basic",
+  "credentialId": "cred_hdip_passport_basic_001",
+  "signedCredential": {
+    "format": "sd_jwt_vc",
+    "mediaType": "application/vc+sd-jwt",
+    "value": "eyJhbGciOiJFUzI1NiJ9.placeholder.credential"
+  }
+}

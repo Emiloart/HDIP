@@ -77,6 +77,90 @@
       "schema": "credentials/credential-template-metadata.schema.json",
       "fixture": "credentials/credential-template-metadata.empty-types.invalid.json",
       "valid": false
+    },
+    {
+      "contract": "issuanceRequest",
+      "schema": "credentials/issuance-request.schema.json",
+      "fixture": "issuer/issuance-request.hdip-passport-basic.json",
+      "valid": true
+    },
+    {
+      "contract": "issuanceRequest",
+      "schema": "credentials/issuance-request.schema.json",
+      "fixture": "issuer/issuance-request.with-issuer-id.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "issuanceResponse",
+      "schema": "credentials/issuance-response.schema.json",
+      "fixture": "issuer/issuance-response.hdip-passport-basic.json",
+      "valid": true
+    },
+    {
+      "contract": "issuanceResponse",
+      "schema": "credentials/issuance-response.schema.json",
+      "fixture": "issuer/issuance-response.missing-signed-credential.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "credentialRecord",
+      "schema": "credentials/credential-record.schema.json",
+      "fixture": "credentials/credential-record.hdip-passport-basic.json",
+      "valid": true
+    },
+    {
+      "contract": "credentialRecord",
+      "schema": "credentials/credential-record.schema.json",
+      "fixture": "credentials/credential-record.missing-artifact.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "credentialStatus",
+      "schema": "credentials/credential-status.schema.json",
+      "fixture": "credentials/credential-status.active.json",
+      "valid": true
+    },
+    {
+      "contract": "credentialStatus",
+      "schema": "credentials/credential-status.schema.json",
+      "fixture": "credentials/credential-status.invalid-status.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "verificationSubmissionRequest",
+      "schema": "verifier/verification-submission-request.schema.json",
+      "fixture": "verifier/verification-submission-request.hdip-passport-basic.json",
+      "valid": true
+    },
+    {
+      "contract": "verificationSubmissionRequest",
+      "schema": "verifier/verification-submission-request.schema.json",
+      "fixture": "verifier/verification-submission-request.with-verifier-id.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "verificationResult",
+      "schema": "verifier/verification-result.schema.json",
+      "fixture": "verifier/verification-result.allow.json",
+      "valid": true
+    },
+    {
+      "contract": "verificationResult",
+      "schema": "verifier/verification-result.schema.json",
+      "fixture": "verifier/verification-result.invalid-credential-status.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "auditRecord",
+      "schema": "audit/audit-record.schema.json",
+      "fixture": "audit/audit-record.issuance-succeeded.json",
+      "valid": true
+    },
+    {
+      "contract": "auditRecord",
+      "schema": "audit/audit-record.schema.json",
+      "fixture": "audit/audit-record.missing-request-id.invalid.json",
+      "valid": false
     }
   ]
 }

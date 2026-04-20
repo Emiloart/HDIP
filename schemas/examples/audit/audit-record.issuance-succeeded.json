@@ -1,0 +1,17 @@
+{
+  "auditId": "audit_issuance_001",
+  "actor": {
+    "principalId": "issuer_operator_alex",
+    "organizationId": "issuer_org_hdip",
+    "actorType": "issuer_operator",
+    "authenticationReference": "session_issuer_001"
+  },
+  "action": "issuer.credentials.issue",
+  "resourceType": "credential",
+  "resourceId": "cred_hdip_passport_basic_001",
+  "requestId": "req-issuance-001",
+  "idempotencyKey": "issue-credential-001",
+  "outcome": "succeeded",
+  "occurredAt": "2026-04-20T09:00:01Z",
+  "serviceName": "issuer-api"
+}
