@@ -1,0 +1,9 @@
+{
+  "requestId": "kyc-passport-basic-review",
+  "decision": "allow",
+  "reasons": [
+    "stub flow matched the expected issuer profile",
+    "stub flow matched the HDIP passport template contract",
+    "real credential verification is deferred in this slice"
+  ]
+}

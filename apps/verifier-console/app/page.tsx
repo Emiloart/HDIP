@@ -1,26 +1,31 @@
 import { AppShell, SurfaceCard } from "@hdip/ui";
 
-import { trustRegistryApi, verifierApi } from "../lib/api";
+import { verifierApi } from "../lib/api";
 
-export default function VerifierConsolePage() {
+export default async function VerifierConsolePage() {
+  const [policyRequest, result] = await Promise.all([
+    verifierApi.policyRequest("kyc-passport-basic"),
+    verifierApi.stubResult("kyc-passport-basic-review"),
+  ]);
+
   return (
     <AppShell
       eyebrow="HDIP foundation"
       title="Verifier Console"
-      description="This shell preserves clear operator-surface boundaries while contracts, health endpoints, and typed client edges settle before verifier policy logic begins."
+      description="This shell now exercises the first stubbed verifier flow: a policy request and a deterministic result are fetched through typed client boundaries while real proof submission remains deferred."
     >
       <SurfaceCard
-        title="Verifier API boundary"
-        body={`Configured endpoint: ${verifierApi.baseUrl}. The shell is limited to typed client setup and presentation-safe UI framing.`}
+        title="Policy request"
+        body={`${policyRequest.requestId}: ${policyRequest.purpose}. Required predicates: ${policyRequest.requiredPredicates.join("; ")}.`}
         accent="positive"
       />
       <SurfaceCard
-        title="Trust registry boundary"
-        body={`Configured endpoint: ${trustRegistryApi.baseUrl}. Trust metadata flows are not implemented in this slice.`}
+        title="Stub verifier result"
+        body={`Decision: ${result.decision}. Reasons: ${result.reasons.join("; ")}.`}
       />
       <SurfaceCard
-        title="Auth placeholder"
-        body="Real auth and role controls are intentionally deferred. The app establishes the place where they will later attach without hard-coding business logic now."
+        title="Flow boundary"
+        body="This is still a read-only foundation flow. No credential proof, holder submission, or live trust-registry composition happens in this slice."
       />
     </AppShell>
   );

@@ -35,13 +35,13 @@ func Chain(next http.Handler, middlewares ...middleware) http.Handler {
 
 func RouteHandler(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handler, pattern := mux.Handler(r)
+		_, pattern := mux.Handler(r)
 		if pattern == "" {
 			WriteError(w, r.Context(), http.StatusNotFound, "route_not_found", "route not found")
 			return
 		}
 
-		handler.ServeHTTP(w, r)
+		mux.ServeHTTP(w, r)
 	})
 }
 

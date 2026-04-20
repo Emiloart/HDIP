@@ -1,0 +1,5 @@
+{
+  "requestId": "kyc-passport-basic-review",
+  "purpose": "Review a reusable HDIP passport credential for marketplace onboarding",
+  "requiredPredicates": []
+}

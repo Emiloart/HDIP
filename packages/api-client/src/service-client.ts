@@ -1,14 +1,27 @@
 import type { ZodType } from "zod";
 
-import { errorEnvelopeSchema, healthResponseSchema } from "./schemas";
+import {
+  credentialTemplateMetadataSchema,
+  errorEnvelopeSchema,
+  healthResponseSchema,
+  issuerProfileSchema,
+  verifierPolicyRequestSchema,
+  verifierResultSchema,
+} from "./schemas";
 
 export class ServiceClientError extends Error {
   readonly code: string;
   readonly requestId?: string;
   readonly status: number;
 
-  constructor(code: string, message: string, status: number, requestId?: string) {
-    super(message);
+  constructor(
+    code: string,
+    message: string,
+    status: number,
+    requestId?: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
     this.name = "ServiceClientError";
     this.code = code;
     this.status = status;
@@ -24,15 +37,63 @@ export function buildServiceUrl(baseUrl: string, path: string) {
   return `${normalizedBase}${normalizedPath}`;
 }
 
+function encodePathSegment(value: string) {
+  return encodeURIComponent(value);
+}
+
+function parseJsonBody(rawBody: string, status: number) {
+  if (rawBody.trim() === "") {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawBody) as unknown;
+  } catch (error) {
+    throw new ServiceClientError(
+      "invalid_json",
+      "response body was not valid JSON",
+      status,
+      undefined,
+      { cause: error },
+    );
+  }
+}
+
+function parseTypedPayload<T>(payload: unknown, schema: ZodType<T>, status: number): T {
+  const parsedPayload = schema.safeParse(payload);
+  if (!parsedPayload.success) {
+    throw new ServiceClientError(
+      "invalid_response",
+      "response payload did not match the expected schema",
+      status,
+      undefined,
+      { cause: parsedPayload.error },
+    );
+  }
+
+  return parsedPayload.data;
+}
+
 async function fetchWithSchema<T>(url: string, schema: ZodType<T>): Promise<T> {
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+  } catch (error) {
+    throw new ServiceClientError(
+      "network_error",
+      "request could not be completed",
+      0,
+      undefined,
+      { cause: error },
+    );
+  }
 
   const rawBody = await response.text();
-  const payload = rawBody === "" ? null : JSON.parse(rawBody);
+  const payload = parseJsonBody(rawBody, response.status);
 
   if (!response.ok) {
     const parsedError = errorEnvelopeSchema.safeParse(payload);
@@ -52,7 +113,7 @@ async function fetchWithSchema<T>(url: string, schema: ZodType<T>): Promise<T> {
     );
   }
 
-  return schema.parse(payload);
+  return parseTypedPayload(payload, schema, response.status);
 }
 
 export function createServiceClient(baseUrl: string) {
@@ -63,6 +124,43 @@ export function createServiceClient(baseUrl: string) {
     },
     readiness() {
       return fetchWithSchema(buildServiceUrl(baseUrl, "/readyz"), healthResponseSchema);
+    },
+  };
+}
+
+export function createIssuerApiClient(baseUrl: string) {
+  const service = createServiceClient(baseUrl);
+
+  return {
+    ...service,
+    profile() {
+      return fetchWithSchema(buildServiceUrl(baseUrl, "/v1/issuer/profile"), issuerProfileSchema);
+    },
+    template(templateId: string) {
+      return fetchWithSchema(
+        buildServiceUrl(baseUrl, `/v1/issuer/templates/${encodePathSegment(templateId)}`),
+        credentialTemplateMetadataSchema,
+      );
+    },
+  };
+}
+
+export function createVerifierApiClient(baseUrl: string) {
+  const service = createServiceClient(baseUrl);
+
+  return {
+    ...service,
+    policyRequest(policyId: string) {
+      return fetchWithSchema(
+        buildServiceUrl(baseUrl, `/v1/verifier/policy-requests/${encodePathSegment(policyId)}`),
+        verifierPolicyRequestSchema,
+      );
+    },
+    stubResult(requestId: string) {
+      return fetchWithSchema(
+        buildServiceUrl(baseUrl, `/v1/verifier/results/${encodePathSegment(requestId)}/stub`),
+        verifierResultSchema,
+      );
     },
   };
 }

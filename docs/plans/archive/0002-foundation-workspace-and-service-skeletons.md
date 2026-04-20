@@ -1,6 +1,6 @@
 # 0002 Foundation Workspace And Service Skeletons
 
-- Status: active
+- Status: archived
 - Date: 2026-04-06
 - Owners: repository maintainer
 

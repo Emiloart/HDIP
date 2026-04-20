@@ -47,7 +47,7 @@ Security impact and privacy impact must be declared as `none` or described.
 
 ## Available validation
 
-The repo is still in bootstrap, so validation is currently governance-oriented:
+The repo now has a foundation validation baseline across governance, Rust, Go, TypeScript, and schema checks:
 
 - `bash scripts/check-governance.sh`
 - `bash scripts/check-no-secrets.sh`
@@ -55,7 +55,7 @@ The repo is still in bootstrap, so validation is currently governance-oriented:
 
 `make` may be used as a wrapper when available, but it is not the only supported entrypoint.
 
-As code lands, language- and runtime-specific checks will be added here and in CI.
+These commands already cover the current language- and runtime-specific checks wired into the foundation slice and CI.
 
 ## Bootstrap exception
 

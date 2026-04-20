@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "route_not_found",
+    "message": "route not found",
+    "requestId": "req-1"
+  }
+}

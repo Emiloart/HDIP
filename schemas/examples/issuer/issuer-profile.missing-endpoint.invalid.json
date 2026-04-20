@@ -1,0 +1,7 @@
+{
+  "issuerId": "did:web:issuer.hdip.dev",
+  "displayName": "HDIP Passport Issuer",
+  "supportedCredentialTemplates": [
+    "hdip-passport-basic"
+  ]
+}

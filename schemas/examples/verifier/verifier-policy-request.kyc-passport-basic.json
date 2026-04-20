@@ -1,0 +1,9 @@
+{
+  "requestId": "kyc-passport-basic-review",
+  "purpose": "Review a reusable HDIP passport credential for marketplace onboarding",
+  "requiredPredicates": [
+    "credentialType == HDIPPassportCredential",
+    "credentialType == KycCredential",
+    "issuerId == did:web:issuer.hdip.dev"
+  ]
+}

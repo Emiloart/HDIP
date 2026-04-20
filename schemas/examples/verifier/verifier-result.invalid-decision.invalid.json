@@ -1,0 +1,7 @@
+{
+  "requestId": "kyc-passport-basic-review",
+  "decision": "accept",
+  "reasons": [
+    "invalid enum example"
+  ]
+}

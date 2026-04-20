@@ -6,6 +6,12 @@ import addFormats from "ajv-formats";
 
 const root = process.cwd();
 const schemaRoot = path.join(root, "schemas", "json");
+const exampleRoot = path.join(root, "schemas", "examples");
+const exampleManifestPath = path.join(exampleRoot, "manifest.json");
+
+async function readJson(filePath) {
+  return JSON.parse(await fs.readFile(filePath, "utf8"));
+}
 
 async function collectSchemaFiles(directory) {
   const entries = await fs.readdir(directory, { withFileTypes: true });
@@ -35,10 +41,35 @@ if (schemaFiles.length === 0) {
   throw new Error("no schema files found");
 }
 
+const validators = new Map();
+
 for (const file of schemaFiles) {
-  const raw = await fs.readFile(file, "utf8");
-  const schema = JSON.parse(raw);
-  ajv.compile(schema);
+  const schema = await readJson(file);
+  const relativeSchemaPath = path.relative(schemaRoot, file).split(path.sep).join("/");
+  validators.set(relativeSchemaPath, ajv.compile(schema));
 }
 
-console.log(`Validated ${schemaFiles.length} schema files.`);
+const manifest = await readJson(exampleManifestPath);
+if (!Array.isArray(manifest.examples) || manifest.examples.length === 0) {
+  throw new Error("no schema examples found in manifest");
+}
+
+for (const example of manifest.examples) {
+  const validator = validators.get(example.schema);
+  if (!validator) {
+    throw new Error(`no validator found for schema ${example.schema}`);
+  }
+
+  const fixturePath = path.join(exampleRoot, example.fixture);
+  const payload = await readJson(fixturePath);
+  const isValid = validator(payload);
+
+  if (isValid !== example.valid) {
+    const details = validator.errors ? ajv.errorsText(validator.errors, { separator: "; " }) : "no details";
+    throw new Error(
+      `example ${example.fixture} expected valid=${example.valid} against ${example.schema}, got valid=${isValid}: ${details}`,
+    );
+  }
+}
+
+console.log(`Validated ${schemaFiles.length} schema files and ${manifest.examples.length} contract examples.`);

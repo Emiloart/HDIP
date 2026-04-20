@@ -22,6 +22,7 @@ required_dirs=(
   "packages"
   "packages/go"
   "schemas"
+  "schemas/examples"
   "schemas/json"
   "scripts"
   "services"
@@ -58,6 +59,7 @@ required_files=(
   "docs/plans/README.md"
   "docs/standards/README.md"
   "docs/privacy/README.md"
+  "schemas/examples/manifest.json"
 )
 
 if [[ -f .codex ]]; then

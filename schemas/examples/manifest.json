@@ -1,0 +1,82 @@
+{
+  "examples": [
+    {
+      "contract": "errorEnvelope",
+      "schema": "common/error-envelope.schema.json",
+      "fixture": "common/error-envelope.route-not-found.json",
+      "valid": true
+    },
+    {
+      "contract": "errorEnvelope",
+      "schema": "common/error-envelope.schema.json",
+      "fixture": "common/error-envelope.missing-message.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "healthResponse",
+      "schema": "common/health.schema.json",
+      "fixture": "common/health.ok.json",
+      "valid": true
+    },
+    {
+      "contract": "healthResponse",
+      "schema": "common/health.schema.json",
+      "fixture": "common/health.ready.json",
+      "valid": true
+    },
+    {
+      "contract": "healthResponse",
+      "schema": "common/health.schema.json",
+      "fixture": "common/health.missing-version.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "issuerProfile",
+      "schema": "issuer/issuer-profile.schema.json",
+      "fixture": "issuer/issuer-profile.default.json",
+      "valid": true
+    },
+    {
+      "contract": "issuerProfile",
+      "schema": "issuer/issuer-profile.schema.json",
+      "fixture": "issuer/issuer-profile.missing-endpoint.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "verifierPolicyRequest",
+      "schema": "verifier/verifier-policy-request.schema.json",
+      "fixture": "verifier/verifier-policy-request.kyc-passport-basic.json",
+      "valid": true
+    },
+    {
+      "contract": "verifierPolicyRequest",
+      "schema": "verifier/verifier-policy-request.schema.json",
+      "fixture": "verifier/verifier-policy-request.empty-predicates.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "verifierResult",
+      "schema": "verifier/verifier-result.schema.json",
+      "fixture": "verifier/verifier-result.kyc-passport-basic-review.json",
+      "valid": true
+    },
+    {
+      "contract": "verifierResult",
+      "schema": "verifier/verifier-result.schema.json",
+      "fixture": "verifier/verifier-result.invalid-decision.invalid.json",
+      "valid": false
+    },
+    {
+      "contract": "credentialTemplateMetadata",
+      "schema": "credentials/credential-template-metadata.schema.json",
+      "fixture": "credentials/credential-template-metadata.hdip-passport-basic.json",
+      "valid": true
+    },
+    {
+      "contract": "credentialTemplateMetadata",
+      "schema": "credentials/credential-template-metadata.schema.json",
+      "fixture": "credentials/credential-template-metadata.empty-types.invalid.json",
+      "valid": false
+    }
+  ]
+}

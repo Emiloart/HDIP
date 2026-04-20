@@ -23,14 +23,34 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	port, err := getenvInt("HDIP_PORT", 8081)
+	if err != nil {
+		return Config{}, err
+	}
+
+	requestTimeout, err := getenvDuration("HDIP_REQUEST_TIMEOUT", 5*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+
+	readHeaderTimeout, err := getenvDuration("HDIP_READ_HEADER_TIMEOUT", 3*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+
+	shutdownTimeout, err := getenvDuration("HDIP_SHUTDOWN_TIMEOUT", 10*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		ServiceName:       serviceName,
 		Host:              getenv("HDIP_HOST", "127.0.0.1"),
-		Port:              getenvInt("HDIP_PORT", 8081),
+		Port:              port,
 		LogLevel:          getenv("HDIP_LOG_LEVEL", "INFO"),
-		RequestTimeout:    getenvDuration("HDIP_REQUEST_TIMEOUT", 5*time.Second),
-		ReadHeaderTimeout: getenvDuration("HDIP_READ_HEADER_TIMEOUT", 3*time.Second),
-		ShutdownTimeout:   getenvDuration("HDIP_SHUTDOWN_TIMEOUT", 10*time.Second),
+		RequestTimeout:    requestTimeout,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ShutdownTimeout:   shutdownTimeout,
 		BuildVersion:      getenv("HDIP_BUILD_VERSION", "dev"),
 	}
 
@@ -70,30 +90,30 @@ func getenv(key string, fallback string) string {
 	return fallback
 }
 
-func getenvInt(key string, fallback int) int {
+func getenvInt(key string, fallback int) (int, error) {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
-		return fallback
+		return fallback, nil
 	}
 
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("%s must be a valid integer, got %q", key, value)
 	}
 
-	return parsed
+	return parsed, nil
 }
 
-func getenvDuration(key string, fallback time.Duration) time.Duration {
+func getenvDuration(key string, fallback time.Duration) (time.Duration, error) {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
-		return fallback
+		return fallback, nil
 	}
 
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("%s must be a valid duration, got %q", key, value)
 	}
 
-	return parsed
+	return parsed, nil
 }

@@ -8,7 +8,7 @@ If the repository structure changes, this file must be updated in the same chang
 ## Current state
 
 The repository is in foundation scaffolding.
-Governance is in place and the first executable baseline is limited to Slice A foundation code.
+Governance is in place, the first executable baseline is landed, and the issuer/verifier surfaces now include deterministic stub flow endpoints built on the foundation contracts.
 
 ## Ownership model
 

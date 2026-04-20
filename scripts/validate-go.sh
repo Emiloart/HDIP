@@ -12,7 +12,12 @@ for module in "${modules[@]}"; do
   dir="$(dirname "$module")"
   mapfile -t go_files < <(find "$dir" -name '*.go' -print | sort)
   if [[ "${#go_files[@]}" -gt 0 ]]; then
-    gofmt -w "${go_files[@]}"
+    gofmt_output="$(gofmt -l "${go_files[@]}")"
+    if [[ -n "$gofmt_output" ]]; then
+      echo "error: gofmt drift detected"
+      echo "$gofmt_output"
+      exit 1
+    fi
   fi
 done
 

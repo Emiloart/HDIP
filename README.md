@@ -1,12 +1,12 @@
 # HDIP
 
-HDIP is a hybrid decentralized identity and trust infrastructure platform.
+HDIP is a hybrid decentralized identity passport and trust infrastructure platform.
 Users hold portable credentials and selective disclosure proofs, while issuers, verifiers, and platform operators rely on standards-based trust rails, policy controls, and auditability.
 
 ## Current phase
 
-This repository is in foundation bootstrap.
-Governance, architecture, repo structure, and security/privacy constraints are being established before product implementation.
+This repository has moved past governance-only bootstrap into the executable foundation slice.
+The Rust core crates, Go service skeletons, web shells, shared packages, schemas, validation wiring, and the first deterministic stub issuer/verifier flow are in place, while real issuance and verification logic remain intentionally deferred.
 
 ## Working agreements
 
@@ -17,7 +17,7 @@ Governance, architecture, repo structure, and security/privacy constraints are b
 
 ## Validation
 
-Current bootstrap validation commands:
+Current foundation validation commands:
 
 - `bash scripts/check-governance.sh`
 - `bash scripts/check-no-secrets.sh`

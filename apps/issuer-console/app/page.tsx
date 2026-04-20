@@ -1,26 +1,31 @@
 import { AppShell, SurfaceCard } from "@hdip/ui";
 
-import { issuerApi, trustRegistryApi } from "../lib/api";
+import { issuerApi } from "../lib/api";
 
-export default function IssuerConsolePage() {
+export default async function IssuerConsolePage() {
+  const [profile, template] = await Promise.all([
+    issuerApi.profile(),
+    issuerApi.template("hdip-passport-basic"),
+  ]);
+
   return (
     <AppShell
       eyebrow="HDIP foundation"
       title="Issuer Console"
-      description="This shell establishes typed API boundaries, environment loading, and shared layout discipline before any real credential issuance logic lands."
+      description="This shell now exercises the first stubbed issuer flow: profile metadata and a credential template are fetched through typed client boundaries while real issuance remains deferred."
     >
       <SurfaceCard
-        title="Issuer API boundary"
-        body={`Configured endpoint: ${issuerApi.baseUrl}. Health and readiness are the only live contracts in this slice.`}
+        title="Issuer profile"
+        body={`${profile.displayName} (${profile.issuerId}) publishes its stub issuer endpoint at ${profile.endpoint}.`}
         accent="positive"
       />
       <SurfaceCard
-        title="Trust registry boundary"
-        body={`Configured endpoint: ${trustRegistryApi.baseUrl}. Registry business logic is intentionally deferred.`}
+        title="Credential template"
+        body={`${template.displayName} v${template.version} advertises credential types ${template.credentialTypes.join(", ")}.`}
       />
       <SurfaceCard
-        title="Auth placeholder"
-        body="Authentication is intentionally absent in this slice. Real operator auth and authorization land after the service and contract baseline is stable."
+        title="Stub flow handoff"
+        body={`Supported template IDs: ${profile.supportedCredentialTemplates.join(", ")}. The verifier console consumes the matching stub policy request and decision path next.`}
       />
     </AppShell>
   );
