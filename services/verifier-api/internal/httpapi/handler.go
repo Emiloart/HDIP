@@ -10,6 +10,7 @@ import (
 
 func NewMux(logger *slog.Logger, cfg config.Config) http.Handler {
 	mux := http.NewServeMux()
+	phase1Handler := newPhase1VerifierHandler()
 	mux.Handle("/healthz", httpx.HealthHandler(cfg.ServiceName, cfg.BuildVersion))
 	mux.Handle("/readyz", httpx.ReadyHandler(cfg.ServiceName, cfg.BuildVersion))
 	mux.HandleFunc("GET /v1/verifier/policy-requests/{policyId}", func(w http.ResponseWriter, r *http.Request) {
@@ -22,6 +23,8 @@ func NewMux(logger *slog.Logger, cfg config.Config) http.Handler {
 
 		httpx.WriteJSON(w, http.StatusOK, policy)
 	})
+	mux.HandleFunc("POST /v1/verifier/verifications", phase1Handler.createVerification)
+	mux.HandleFunc("GET /v1/verifier/verifications/{verificationId}", phase1Handler.getVerification)
 	mux.HandleFunc("GET /v1/verifier/results/{requestId}/stub", func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.PathValue("requestId")
 		result, ok := stubVerifierResult(requestID)

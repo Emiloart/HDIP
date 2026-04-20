@@ -2,12 +2,15 @@ package phase1
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Emiloart/HDIP/packages/go/foundation/authctx"
 )
 
 type VerificationDecision string
+
+var ErrRecordNotFound = errors.New("phase1 record not found")
 
 const (
 	VerificationDecisionAllow  VerificationDecision = "allow"

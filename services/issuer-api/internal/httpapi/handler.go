@@ -10,11 +10,14 @@ import (
 
 func NewMux(logger *slog.Logger, cfg config.Config) http.Handler {
 	mux := http.NewServeMux()
+	phase1Handler := newPhase1IssuerHandler()
 	mux.Handle("/healthz", httpx.HealthHandler(cfg.ServiceName, cfg.BuildVersion))
 	mux.Handle("/readyz", httpx.ReadyHandler(cfg.ServiceName, cfg.BuildVersion))
 	mux.HandleFunc("GET /v1/issuer/profile", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, stubIssuerProfile(cfg))
 	})
+	mux.HandleFunc("POST /v1/issuer/credentials", phase1Handler.issueCredential)
+	mux.HandleFunc("GET /v1/issuer/credentials/{credentialId}", phase1Handler.getCredential)
 	mux.HandleFunc("GET /v1/issuer/templates/{templateId}", func(w http.ResponseWriter, r *http.Request) {
 		templateID := r.PathValue("templateId")
 		template, ok := stubCredentialTemplate(templateID)
