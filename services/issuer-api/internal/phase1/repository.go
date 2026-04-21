@@ -2,6 +2,7 @@ package phase1
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -74,6 +75,21 @@ type AuditRecord struct {
 	ServiceName    string
 }
 
+type IdempotencyRecord struct {
+	Operation            string
+	CallerPrincipalID    string
+	CallerOrganizationID string
+	CallerActorType      string
+	IdempotencyKey       string
+	RequestFingerprint   string
+	ResponseStatusCode   int
+	ResourceType         string
+	ResourceID           string
+	Location             string
+	ResponseBody         json.RawMessage
+	CreatedAt            time.Time
+}
+
 type IssuerRecordRepository interface {
 	GetIssuerRecord(ctx context.Context, issuerID string) (IssuerRecord, error)
 }
@@ -93,4 +109,16 @@ type CredentialRecordRepository interface {
 
 type AuditRecordRepository interface {
 	AppendAuditRecord(ctx context.Context, record AuditRecord) error
+}
+
+type IdempotencyRecordRepository interface {
+	CreateIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error
+	GetIdempotencyRecord(
+		ctx context.Context,
+		operation string,
+		callerOrganizationID string,
+		callerPrincipalID string,
+		callerActorType string,
+		idempotencyKey string,
+	) (IdempotencyRecord, error)
 }

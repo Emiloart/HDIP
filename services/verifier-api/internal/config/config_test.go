@@ -29,12 +29,26 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
-		Phase1RuntimePath: "phase1-runtime.sqlite",
+		Phase1StatePath:   "phase1-state.json",
 		BuildVersion:      "dev",
 	}
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestLoadUsesLegacyRuntimePathEnvFallback(t *testing.T) {
+	t.Setenv("HDIP_PHASE1_STATE_PATH", "")
+	t.Setenv("HDIP_PHASE1_RUNTIME_PATH", "legacy-phase1-state.json")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Phase1StatePath != "legacy-phase1-state.json" {
+		t.Fatalf("expected legacy state path fallback, got %q", cfg.Phase1StatePath)
 	}
 }
 

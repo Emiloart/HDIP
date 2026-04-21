@@ -29,6 +29,7 @@ type persistedState struct {
 	Credentials          map[string]CredentialRecord          `json:"credentials"`
 	VerificationRequests map[string]VerificationRequestRecord `json:"verificationRequests"`
 	VerificationResults  map[string]VerificationResultRecord  `json:"verificationResults"`
+	IdempotencyRecords   map[string]IdempotencyRecord         `json:"idempotencyRecords"`
 	Audits               []AuditRecord                        `json:"audits"`
 }
 
@@ -116,6 +117,21 @@ type AuditRecord struct {
 	Outcome        string
 	OccurredAt     time.Time
 	ServiceName    string
+}
+
+type IdempotencyRecord struct {
+	Operation            string          `json:"operation"`
+	CallerPrincipalID    string          `json:"callerPrincipalId"`
+	CallerOrganizationID string          `json:"callerOrganizationId"`
+	CallerActorType      string          `json:"callerActorType"`
+	IdempotencyKey       string          `json:"idempotencyKey"`
+	RequestFingerprint   string          `json:"requestFingerprint"`
+	ResponseStatusCode   int             `json:"responseStatusCode"`
+	ResourceType         string          `json:"resourceType"`
+	ResourceID           string          `json:"resourceId"`
+	Location             string          `json:"location,omitempty"`
+	ResponseBody         json.RawMessage `json:"responseBody"`
+	CreatedAt            time.Time       `json:"createdAt"`
 }
 
 func Open(path string) (*Store, error) {
@@ -400,6 +416,66 @@ func (s *Store) ListAuditRecords(ctx context.Context) ([]AuditRecord, error) {
 	return records, nil
 }
 
+func (s *Store) CreateIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error {
+	_ = ctx
+
+	return s.withMutableState(func(state *persistedState) error {
+		key := idempotencyStorageKey(record.Operation, record.CallerOrganizationID, record.CallerPrincipalID, record.CallerActorType, record.IdempotencyKey)
+		if _, ok := state.IdempotencyRecords[key]; ok {
+			return fmt.Errorf("idempotency record already exists: %s", key)
+		}
+
+		state.IdempotencyRecords[key] = cloneIdempotencyRecord(record)
+		return nil
+	})
+}
+
+func (s *Store) GetIdempotencyRecord(
+	ctx context.Context,
+	operation string,
+	callerOrganizationID string,
+	callerPrincipalID string,
+	callerActorType string,
+	idempotencyKey string,
+) (IdempotencyRecord, error) {
+	_ = ctx
+
+	var record IdempotencyRecord
+	err := s.withReadState(func(state persistedState) error {
+		key := idempotencyStorageKey(operation, callerOrganizationID, callerPrincipalID, callerActorType, idempotencyKey)
+		storedRecord, ok := state.IdempotencyRecords[key]
+		if !ok {
+			return ErrRecordNotFound
+		}
+
+		record = cloneIdempotencyRecord(storedRecord)
+		return nil
+	})
+	if err != nil {
+		return IdempotencyRecord{}, err
+	}
+
+	return record, nil
+}
+
+func (s *Store) ListIdempotencyRecords(ctx context.Context) ([]IdempotencyRecord, error) {
+	_ = ctx
+
+	var records []IdempotencyRecord
+	err := s.withReadState(func(state persistedState) error {
+		records = make([]IdempotencyRecord, 0, len(state.IdempotencyRecords))
+		for _, record := range state.IdempotencyRecords {
+			records = append(records, cloneIdempotencyRecord(record))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return records, nil
+}
+
 func (s *Store) withReadState(fn func(state persistedState) error) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -489,6 +565,7 @@ func defaultState() persistedState {
 		Credentials:          make(map[string]CredentialRecord),
 		VerificationRequests: make(map[string]VerificationRequestRecord),
 		VerificationResults:  make(map[string]VerificationResultRecord),
+		IdempotencyRecords:   make(map[string]IdempotencyRecord),
 		Audits:               []AuditRecord{},
 	}
 }
@@ -508,6 +585,9 @@ func normalizeState(state *persistedState) {
 	}
 	if state.VerificationResults == nil {
 		state.VerificationResults = make(map[string]VerificationResultRecord)
+	}
+	if state.IdempotencyRecords == nil {
+		state.IdempotencyRecords = make(map[string]IdempotencyRecord)
 	}
 	if state.Audits == nil {
 		state.Audits = []AuditRecord{}
@@ -529,7 +609,7 @@ func canonicalStorePath(path string) (string, error) {
 	if trimmedPath == ":memory:" {
 		return filepath.Join(
 			os.TempDir(),
-			fmt.Sprintf("hdip-phase1-runtime-memory-%d.json", atomic.AddInt64(&inMemoryCounter, 1)),
+			fmt.Sprintf("hdip-phase1-state-memory-%d.json", atomic.AddInt64(&inMemoryCounter, 1)),
 		), nil
 	}
 
@@ -638,6 +718,39 @@ func cloneAuditRecord(record AuditRecord) AuditRecord {
 		OccurredAt:     record.OccurredAt.UTC(),
 		ServiceName:    record.ServiceName,
 	}
+}
+
+func cloneIdempotencyRecord(record IdempotencyRecord) IdempotencyRecord {
+	return IdempotencyRecord{
+		Operation:            record.Operation,
+		CallerPrincipalID:    record.CallerPrincipalID,
+		CallerOrganizationID: record.CallerOrganizationID,
+		CallerActorType:      record.CallerActorType,
+		IdempotencyKey:       record.IdempotencyKey,
+		RequestFingerprint:   record.RequestFingerprint,
+		ResponseStatusCode:   record.ResponseStatusCode,
+		ResourceType:         record.ResourceType,
+		ResourceID:           record.ResourceID,
+		Location:             record.Location,
+		ResponseBody:         append(json.RawMessage(nil), record.ResponseBody...),
+		CreatedAt:            record.CreatedAt.UTC(),
+	}
+}
+
+func idempotencyStorageKey(
+	operation string,
+	callerOrganizationID string,
+	callerPrincipalID string,
+	callerActorType string,
+	idempotencyKey string,
+) string {
+	return strings.Join([]string{
+		strings.TrimSpace(operation),
+		strings.TrimSpace(callerOrganizationID),
+		strings.TrimSpace(callerPrincipalID),
+		strings.TrimSpace(callerActorType),
+		strings.TrimSpace(idempotencyKey),
+	}, "|")
 }
 
 func formatCredentialID(templateID string, sequence int) string {

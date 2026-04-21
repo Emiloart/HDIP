@@ -20,7 +20,7 @@ type Config struct {
 	RequestTimeout    time.Duration
 	ReadHeaderTimeout time.Duration
 	ShutdownTimeout   time.Duration
-	Phase1RuntimePath string
+	Phase1StatePath   string
 	BuildVersion      string
 }
 
@@ -53,7 +53,7 @@ func Load() (Config, error) {
 		RequestTimeout:    requestTimeout,
 		ReadHeaderTimeout: readHeaderTimeout,
 		ShutdownTimeout:   shutdownTimeout,
-		Phase1RuntimePath: getenv("HDIP_PHASE1_RUNTIME_PATH", defaultPhase1RuntimePath()),
+		Phase1StatePath:   phase1StatePath(),
 		BuildVersion:      getenv("HDIP_BUILD_VERSION", "dev"),
 	}
 
@@ -76,8 +76,8 @@ func (c Config) Validate() error {
 		return errors.New("read header timeout must be positive")
 	case c.ShutdownTimeout <= 0:
 		return errors.New("shutdown timeout must be positive")
-	case strings.TrimSpace(c.Phase1RuntimePath) == "":
-		return errors.New("phase1 runtime path must not be empty")
+	case strings.TrimSpace(c.Phase1StatePath) == "":
+		return errors.New("phase1 state path must not be empty")
 	default:
 		return nil
 	}
@@ -123,6 +123,14 @@ func getenvDuration(key string, fallback time.Duration) (time.Duration, error) {
 	return parsed, nil
 }
 
-func defaultPhase1RuntimePath() string {
-	return filepath.Join(os.TempDir(), "hdip-phase1-runtime.sqlite")
+func phase1StatePath() string {
+	if value := strings.TrimSpace(os.Getenv("HDIP_PHASE1_STATE_PATH")); value != "" {
+		return value
+	}
+
+	return getenv("HDIP_PHASE1_RUNTIME_PATH", defaultPhase1StatePath())
+}
+
+func defaultPhase1StatePath() string {
+	return filepath.Join(os.TempDir(), "hdip-phase1-state.json")
 }

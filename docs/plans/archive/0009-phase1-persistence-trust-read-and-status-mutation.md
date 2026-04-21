@@ -1,6 +1,6 @@
 # 0009 Phase 1 Persistence Trust Read And Status Mutation
 
-- Status: active
+- Status: completed
 - Date: 2026-04-21
 - Owners: repository maintainer
 
@@ -78,5 +78,4 @@ Do not keep a half-migrated state where issuer and verifier read different crede
 
 ## Open questions
 
-- whether the first runtime adapter should preserve optional idempotency-key replay semantics in this slice or remain append-only without deduplication until a later persistence hardening pass
 - whether the future `trust-registry` read path should replace the shared runtime issuer record table directly or through a narrower internal read adapter

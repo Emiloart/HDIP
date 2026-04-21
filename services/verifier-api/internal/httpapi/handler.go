@@ -9,7 +9,7 @@ import (
 )
 
 func NewMux(logger *slog.Logger, cfg config.Config) (http.Handler, error) {
-	phase1Handler, err := newPhase1VerifierHandler(cfg.Phase1RuntimePath)
+	phase1Handler, err := newPhase1VerifierHandler(cfg.Phase1StatePath)
 	if err != nil {
 		return nil, err
 	}

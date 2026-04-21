@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -32,6 +33,7 @@ type phase1IssuerHandler struct {
 	issuerExtractor authctx.IssuerOperatorExtractor
 	issuers         phase1.IssuerRecordRepository
 	credentials     phase1.CredentialRecordRepository
+	idempotency     phase1.IdempotencyRecordRepository
 	audits          phase1.AuditRecordRepository
 }
 
@@ -117,6 +119,7 @@ func newPhase1IssuerHandlerWithStore(store *phase1.RuntimeStore) *phase1IssuerHa
 		issuerExtractor: authctx.HeaderIssuerOperatorExtractor{},
 		issuers:         store,
 		credentials:     store,
+		idempotency:     store,
 		audits:          store,
 	}
 }
@@ -147,6 +150,15 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 	if !contains(issuerRecord.AllowedTemplateIDs, request.TemplateID) {
 		httpx.WriteError(w, r.Context(), http.StatusBadRequest, "unsupported_template", "credential template is not allowed for issuer")
 		return
+	}
+
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	requestFingerprint := issuanceRequestFingerprint(request)
+	if idempotencyKey != "" {
+		handled, ok := h.handleIssuanceIdempotency(w, r, attribution, idempotencyKey, requestFingerprint)
+		if handled || !ok {
+			return
+		}
 	}
 
 	credentialID, err := h.credentials.NextCredentialID(r.Context(), request.TemplateID)
@@ -191,21 +203,7 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
-		AuditID:        auditIDForAction(r, "issue"),
-		Actor:          attribution,
-		Action:         issuerIssueScope,
-		ResourceType:   "credential",
-		ResourceID:     record.CredentialID,
-		RequestID:      httpx.RequestIDFromContext(r.Context()),
-		IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key")),
-		Outcome:        "succeeded",
-		OccurredAt:     issuedAt,
-		ServiceName:    "issuer-api",
-	})
-
-	w.Header().Set("Location", "/v1/issuer/credentials/"+record.CredentialID)
-	httpx.WriteJSON(w, http.StatusCreated, issuanceResponsePayload{
+	response := issuanceResponsePayload{
 		CredentialID:    record.CredentialID,
 		IssuerID:        record.IssuerID,
 		TemplateID:      record.TemplateID,
@@ -218,7 +216,42 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 			MediaType: record.CredentialArtifact.MediaType,
 			Value:     record.CredentialArtifact.Value,
 		},
+	}
+	location := "/v1/issuer/credentials/" + record.CredentialID
+	if idempotencyKey != "" {
+		if err := h.storeIdempotencyResponse(
+			r.Context(),
+			attribution,
+			issuerIssueScope,
+			idempotencyKey,
+			requestFingerprint,
+			http.StatusCreated,
+			"credential",
+			record.CredentialID,
+			location,
+			response,
+			record.IssuedAt,
+		); err != nil {
+			httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "issuance replay state could not be stored")
+			return
+		}
+	}
+
+	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
+		AuditID:        auditIDForAction(r, "issue"),
+		Actor:          attribution,
+		Action:         issuerIssueScope,
+		ResourceType:   "credential",
+		ResourceID:     record.CredentialID,
+		RequestID:      httpx.RequestIDFromContext(r.Context()),
+		IdempotencyKey: idempotencyKey,
+		Outcome:        "succeeded",
+		OccurredAt:     issuedAt,
+		ServiceName:    "issuer-api",
 	})
+
+	w.Header().Set("Location", location)
+	httpx.WriteJSON(w, http.StatusCreated, response)
 }
 
 func (h *phase1IssuerHandler) getCredential(w http.ResponseWriter, r *http.Request) {
@@ -291,6 +324,15 @@ func (h *phase1IssuerHandler) updateCredentialStatus(w http.ResponseWriter, r *h
 		return
 	}
 
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	requestFingerprint := credentialStatusUpdateFingerprint(r.PathValue("credentialId"), request)
+	if idempotencyKey != "" {
+		handled, ok := h.handleCredentialStatusIdempotency(w, r, attribution, idempotencyKey, requestFingerprint)
+		if handled || !ok {
+			return
+		}
+	}
+
 	record, err := h.credentials.GetCredentialRecord(r.Context(), r.PathValue("credentialId"))
 	if err != nil {
 		if errors.Is(err, phase1.ErrRecordNotFound) {
@@ -334,6 +376,26 @@ func (h *phase1IssuerHandler) updateCredentialStatus(w http.ResponseWriter, r *h
 	record.StatusUpdatedAt = statusUpdatedAt
 	record.SupersededByCredentialID = strings.TrimSpace(request.SupersededByCredentialID)
 
+	response := credentialStatusPayloadFromRecord(record)
+	if idempotencyKey != "" {
+		if err := h.storeIdempotencyResponse(
+			r.Context(),
+			attribution,
+			issuerStatusWriteScope,
+			idempotencyKey,
+			requestFingerprint,
+			http.StatusOK,
+			"credential",
+			record.CredentialID,
+			"",
+			response,
+			statusUpdatedAt,
+		); err != nil {
+			httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "credential status replay state could not be stored")
+			return
+		}
+	}
+
 	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
 		AuditID:        auditIDForAction(r, "status"),
 		Actor:          attribution,
@@ -341,13 +403,13 @@ func (h *phase1IssuerHandler) updateCredentialStatus(w http.ResponseWriter, r *h
 		ResourceType:   "credential",
 		ResourceID:     record.CredentialID,
 		RequestID:      httpx.RequestIDFromContext(r.Context()),
-		IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key")),
+		IdempotencyKey: idempotencyKey,
 		Outcome:        "succeeded",
 		OccurredAt:     statusUpdatedAt,
 		ServiceName:    "issuer-api",
 	})
 
-	httpx.WriteJSON(w, http.StatusOK, credentialStatusPayloadFromRecord(record))
+	httpx.WriteJSON(w, http.StatusOK, response)
 }
 
 func (h *phase1IssuerHandler) requireIssuerAttribution(w http.ResponseWriter, r *http.Request, scope string) (authctx.Attribution, bool) {
@@ -433,6 +495,138 @@ func auditIDForAction(r *http.Request, action string) string {
 	return httpx.RequestIDFromContext(r.Context()) + ":" + action
 }
 
+func (h *phase1IssuerHandler) handleIssuanceIdempotency(
+	w http.ResponseWriter,
+	r *http.Request,
+	attribution authctx.Attribution,
+	idempotencyKey string,
+	requestFingerprint string,
+) (handled bool, ok bool) {
+	return h.handleIdempotencyReplay(
+		w,
+		r,
+		attribution,
+		issuerIssueScope,
+		idempotencyKey,
+		requestFingerprint,
+		"credential",
+	)
+}
+
+func (h *phase1IssuerHandler) handleCredentialStatusIdempotency(
+	w http.ResponseWriter,
+	r *http.Request,
+	attribution authctx.Attribution,
+	idempotencyKey string,
+	requestFingerprint string,
+) (handled bool, ok bool) {
+	return h.handleIdempotencyReplay(
+		w,
+		r,
+		attribution,
+		issuerStatusWriteScope,
+		idempotencyKey,
+		requestFingerprint,
+		"credential",
+	)
+}
+
+func (h *phase1IssuerHandler) handleIdempotencyReplay(
+	w http.ResponseWriter,
+	r *http.Request,
+	attribution authctx.Attribution,
+	operation string,
+	idempotencyKey string,
+	requestFingerprint string,
+	resourceType string,
+) (handled bool, ok bool) {
+	record, err := h.idempotency.GetIdempotencyRecord(
+		r.Context(),
+		operation,
+		attribution.OrganizationID,
+		attribution.PrincipalID,
+		string(attribution.ActorType),
+		idempotencyKey,
+	)
+	if err != nil {
+		if errors.Is(err, phase1.ErrRecordNotFound) {
+			return false, true
+		}
+
+		httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "idempotency state could not be loaded")
+		return false, false
+	}
+
+	if record.RequestFingerprint != requestFingerprint {
+		_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
+			AuditID:        auditIDForAction(r, "idempotency-conflict"),
+			Actor:          attribution,
+			Action:         operation,
+			ResourceType:   resourceType,
+			ResourceID:     record.ResourceID,
+			RequestID:      httpx.RequestIDFromContext(r.Context()),
+			IdempotencyKey: idempotencyKey,
+			Outcome:        "failed",
+			OccurredAt:     time.Now().UTC(),
+			ServiceName:    "issuer-api",
+		})
+		httpx.WriteError(w, r.Context(), http.StatusConflict, "idempotency_conflict", "Idempotency-Key is already bound to a different Phase 1 request")
+		return true, false
+	}
+
+	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
+		AuditID:        auditIDForAction(r, "idempotency-replay"),
+		Actor:          attribution,
+		Action:         operation,
+		ResourceType:   resourceType,
+		ResourceID:     record.ResourceID,
+		RequestID:      httpx.RequestIDFromContext(r.Context()),
+		IdempotencyKey: idempotencyKey,
+		Outcome:        "replayed",
+		OccurredAt:     time.Now().UTC(),
+		ServiceName:    "issuer-api",
+	})
+	if record.Location != "" {
+		w.Header().Set("Location", record.Location)
+	}
+	writeStoredJSON(w, record.ResponseStatusCode, record.ResponseBody)
+	return true, false
+}
+
+func (h *phase1IssuerHandler) storeIdempotencyResponse(
+	ctx context.Context,
+	attribution authctx.Attribution,
+	operation string,
+	idempotencyKey string,
+	requestFingerprint string,
+	statusCode int,
+	resourceType string,
+	resourceID string,
+	location string,
+	response any,
+	createdAt time.Time,
+) error {
+	rawResponse, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+
+	return h.idempotency.CreateIdempotencyRecord(ctx, phase1.IdempotencyRecord{
+		Operation:            operation,
+		CallerPrincipalID:    attribution.PrincipalID,
+		CallerOrganizationID: attribution.OrganizationID,
+		CallerActorType:      string(attribution.ActorType),
+		IdempotencyKey:       idempotencyKey,
+		RequestFingerprint:   requestFingerprint,
+		ResponseStatusCode:   statusCode,
+		ResourceType:         resourceType,
+		ResourceID:           resourceID,
+		Location:             location,
+		ResponseBody:         rawResponse,
+		CreatedAt:            createdAt,
+	})
+}
+
 func claimsPayloadFromRecord(record phase1.KYCClaims) issuanceKYCClaimsPayload {
 	return issuanceKYCClaimsPayload{
 		FullLegalName:      record.FullLegalName,
@@ -476,6 +670,70 @@ func contains(values []string, target string) bool {
 	}
 
 	return false
+}
+
+func issuanceRequestFingerprint(request issuanceRequestPayload) string {
+	return fingerprintValue(struct {
+		TemplateID       string `json:"templateId"`
+		SubjectReference string `json:"subjectReference"`
+		Claims           struct {
+			FullLegalName      string `json:"fullLegalName"`
+			DateOfBirth        string `json:"dateOfBirth"`
+			CountryOfResidence string `json:"countryOfResidence"`
+			DocumentCountry    string `json:"documentCountry"`
+			KYCLevel           string `json:"kycLevel"`
+			VerifiedAt         string `json:"verifiedAt"`
+			ExpiresAt          string `json:"expiresAt"`
+		} `json:"claims"`
+	}{
+		TemplateID:       strings.TrimSpace(request.TemplateID),
+		SubjectReference: strings.TrimSpace(request.SubjectReference),
+		Claims: struct {
+			FullLegalName      string `json:"fullLegalName"`
+			DateOfBirth        string `json:"dateOfBirth"`
+			CountryOfResidence string `json:"countryOfResidence"`
+			DocumentCountry    string `json:"documentCountry"`
+			KYCLevel           string `json:"kycLevel"`
+			VerifiedAt         string `json:"verifiedAt"`
+			ExpiresAt          string `json:"expiresAt"`
+		}{
+			FullLegalName:      strings.TrimSpace(request.Claims.FullLegalName),
+			DateOfBirth:        strings.TrimSpace(request.Claims.DateOfBirth),
+			CountryOfResidence: strings.TrimSpace(request.Claims.CountryOfResidence),
+			DocumentCountry:    strings.TrimSpace(request.Claims.DocumentCountry),
+			KYCLevel:           strings.TrimSpace(request.Claims.KYCLevel),
+			VerifiedAt:         request.Claims.VerifiedAt.UTC().Format(time.RFC3339Nano),
+			ExpiresAt:          request.Claims.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		},
+	})
+}
+
+func credentialStatusUpdateFingerprint(credentialID string, request credentialStatusUpdateRequestPayload) string {
+	return fingerprintValue(struct {
+		CredentialID             string `json:"credentialId"`
+		Status                   string `json:"status"`
+		SupersededByCredentialID string `json:"supersededByCredentialId"`
+	}{
+		CredentialID:             strings.TrimSpace(credentialID),
+		Status:                   strings.TrimSpace(request.Status),
+		SupersededByCredentialID: strings.TrimSpace(request.SupersededByCredentialID),
+	})
+}
+
+func fingerprintValue(value any) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func writeStoredJSON(w http.ResponseWriter, statusCode int, payload json.RawMessage) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(statusCode)
+	_, _ = w.Write(payload)
 }
 
 type credentialArtifactEnvelope struct {

@@ -76,6 +76,33 @@ func (s *RuntimeStore) AppendAuditRecord(ctx context.Context, record AuditRecord
 	return translateRuntimeError(s.runtime.AppendAuditRecord(ctx, auditRecordToRuntime(record)))
 }
 
+func (s *RuntimeStore) CreateIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error {
+	return translateRuntimeError(s.runtime.CreateIdempotencyRecord(ctx, idempotencyRecordToRuntime(record)))
+}
+
+func (s *RuntimeStore) GetIdempotencyRecord(
+	ctx context.Context,
+	operation string,
+	callerOrganizationID string,
+	callerPrincipalID string,
+	callerActorType string,
+	idempotencyKey string,
+) (IdempotencyRecord, error) {
+	record, err := s.runtime.GetIdempotencyRecord(
+		ctx,
+		operation,
+		callerOrganizationID,
+		callerPrincipalID,
+		callerActorType,
+		idempotencyKey,
+	)
+	if err != nil {
+		return IdempotencyRecord{}, translateRuntimeError(err)
+	}
+
+	return idempotencyRecordFromRuntime(record), nil
+}
+
 func (s *RuntimeStore) SeedIssuerRecord(record IssuerRecord) error {
 	return translateRuntimeError(s.runtime.UpsertIssuerRecord(context.Background(), issuerRecordToRuntime(record)))
 }
@@ -93,6 +120,20 @@ func (s *RuntimeStore) AuditRecords() ([]AuditRecord, error) {
 	result := make([]AuditRecord, 0, len(records))
 	for _, record := range records {
 		result = append(result, auditRecordFromRuntime(record))
+	}
+
+	return result, nil
+}
+
+func (s *RuntimeStore) IdempotencyRecords() ([]IdempotencyRecord, error) {
+	records, err := s.runtime.ListIdempotencyRecords(context.Background())
+	if err != nil {
+		return nil, translateRuntimeError(err)
+	}
+
+	result := make([]IdempotencyRecord, 0, len(records))
+	for _, record := range records {
+		result = append(result, idempotencyRecordFromRuntime(record))
 	}
 
 	return result, nil
@@ -223,6 +264,40 @@ func auditRecordFromRuntime(record phase1runtime.AuditRecord) AuditRecord {
 		Outcome:        record.Outcome,
 		OccurredAt:     record.OccurredAt,
 		ServiceName:    record.ServiceName,
+	}
+}
+
+func idempotencyRecordToRuntime(record IdempotencyRecord) phase1runtime.IdempotencyRecord {
+	return phase1runtime.IdempotencyRecord{
+		Operation:            record.Operation,
+		CallerPrincipalID:    record.CallerPrincipalID,
+		CallerOrganizationID: record.CallerOrganizationID,
+		CallerActorType:      record.CallerActorType,
+		IdempotencyKey:       record.IdempotencyKey,
+		RequestFingerprint:   record.RequestFingerprint,
+		ResponseStatusCode:   record.ResponseStatusCode,
+		ResourceType:         record.ResourceType,
+		ResourceID:           record.ResourceID,
+		Location:             record.Location,
+		ResponseBody:         append([]byte(nil), record.ResponseBody...),
+		CreatedAt:            record.CreatedAt,
+	}
+}
+
+func idempotencyRecordFromRuntime(record phase1runtime.IdempotencyRecord) IdempotencyRecord {
+	return IdempotencyRecord{
+		Operation:            record.Operation,
+		CallerPrincipalID:    record.CallerPrincipalID,
+		CallerOrganizationID: record.CallerOrganizationID,
+		CallerActorType:      record.CallerActorType,
+		IdempotencyKey:       record.IdempotencyKey,
+		RequestFingerprint:   record.RequestFingerprint,
+		ResponseStatusCode:   record.ResponseStatusCode,
+		ResourceType:         record.ResourceType,
+		ResourceID:           record.ResourceID,
+		Location:             record.Location,
+		ResponseBody:         append([]byte(nil), record.ResponseBody...),
+		CreatedAt:            record.CreatedAt,
 	}
 }
 

@@ -43,6 +43,15 @@ func (s *RuntimeStore) GetIssuerRecord(ctx context.Context, issuerID string) (Is
 	return issuerRecordFromRuntime(record), nil
 }
 
+func (s *RuntimeStore) GetIssuerTrustRecord(ctx context.Context, issuerID string) (IssuerTrustRecord, error) {
+	record, err := s.runtime.GetIssuerRecord(ctx, issuerID)
+	if err != nil {
+		return IssuerTrustRecord{}, translateRuntimeError(err)
+	}
+
+	return issuerTrustRecordFromRuntime(record), nil
+}
+
 func (s *RuntimeStore) GetCredentialRecord(ctx context.Context, credentialID string) (CredentialRecord, error) {
 	record, err := s.runtime.GetCredentialRecord(ctx, credentialID)
 	if err != nil {
@@ -95,6 +104,33 @@ func (s *RuntimeStore) AppendAuditRecord(ctx context.Context, record AuditRecord
 	return translateRuntimeError(s.runtime.AppendAuditRecord(ctx, auditRecordToRuntime(record)))
 }
 
+func (s *RuntimeStore) CreateIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error {
+	return translateRuntimeError(s.runtime.CreateIdempotencyRecord(ctx, idempotencyRecordToRuntime(record)))
+}
+
+func (s *RuntimeStore) GetIdempotencyRecord(
+	ctx context.Context,
+	operation string,
+	callerOrganizationID string,
+	callerPrincipalID string,
+	callerActorType string,
+	idempotencyKey string,
+) (IdempotencyRecord, error) {
+	record, err := s.runtime.GetIdempotencyRecord(
+		ctx,
+		operation,
+		callerOrganizationID,
+		callerPrincipalID,
+		callerActorType,
+		idempotencyKey,
+	)
+	if err != nil {
+		return IdempotencyRecord{}, translateRuntimeError(err)
+	}
+
+	return idempotencyRecordFromRuntime(record), nil
+}
+
 func (s *RuntimeStore) SeedIssuerRecord(record IssuerRecord) error {
 	return translateRuntimeError(s.runtime.UpsertIssuerRecord(context.Background(), issuerRecordToRuntime(record)))
 }
@@ -133,6 +169,20 @@ func (s *RuntimeStore) AuditRecords() ([]AuditRecord, error) {
 	return result, nil
 }
 
+func (s *RuntimeStore) IdempotencyRecords() ([]IdempotencyRecord, error) {
+	records, err := s.runtime.ListIdempotencyRecords(context.Background())
+	if err != nil {
+		return nil, translateRuntimeError(err)
+	}
+
+	result := make([]IdempotencyRecord, 0, len(records))
+	for _, record := range records {
+		result = append(result, idempotencyRecordFromRuntime(record))
+	}
+
+	return result, nil
+}
+
 func translateRuntimeError(err error) error {
 	if err == nil {
 		return nil
@@ -166,6 +216,15 @@ func issuerRecordFromRuntime(record phase1runtime.IssuerRecord) IssuerRecord {
 		VerificationKeyReferences: append([]string(nil), record.VerificationKeyReferences...),
 		CreatedAt:                 record.CreatedAt,
 		UpdatedAt:                 record.UpdatedAt,
+	}
+}
+
+func issuerTrustRecordFromRuntime(record phase1runtime.IssuerRecord) IssuerTrustRecord {
+	return IssuerTrustRecord{
+		IssuerID:                  record.IssuerID,
+		TrustState:                record.TrustState,
+		AllowedTemplateIDs:        append([]string(nil), record.AllowedTemplateIDs...),
+		VerificationKeyReferences: append([]string(nil), record.VerificationKeyReferences...),
 	}
 }
 
@@ -270,6 +329,40 @@ func auditRecordFromRuntime(record phase1runtime.AuditRecord) AuditRecord {
 		Outcome:        record.Outcome,
 		OccurredAt:     record.OccurredAt,
 		ServiceName:    record.ServiceName,
+	}
+}
+
+func idempotencyRecordToRuntime(record IdempotencyRecord) phase1runtime.IdempotencyRecord {
+	return phase1runtime.IdempotencyRecord{
+		Operation:            record.Operation,
+		CallerPrincipalID:    record.CallerPrincipalID,
+		CallerOrganizationID: record.CallerOrganizationID,
+		CallerActorType:      record.CallerActorType,
+		IdempotencyKey:       record.IdempotencyKey,
+		RequestFingerprint:   record.RequestFingerprint,
+		ResponseStatusCode:   record.ResponseStatusCode,
+		ResourceType:         record.ResourceType,
+		ResourceID:           record.ResourceID,
+		Location:             record.Location,
+		ResponseBody:         append([]byte(nil), record.ResponseBody...),
+		CreatedAt:            record.CreatedAt,
+	}
+}
+
+func idempotencyRecordFromRuntime(record phase1runtime.IdempotencyRecord) IdempotencyRecord {
+	return IdempotencyRecord{
+		Operation:            record.Operation,
+		CallerPrincipalID:    record.CallerPrincipalID,
+		CallerOrganizationID: record.CallerOrganizationID,
+		CallerActorType:      record.CallerActorType,
+		IdempotencyKey:       record.IdempotencyKey,
+		RequestFingerprint:   record.RequestFingerprint,
+		ResponseStatusCode:   record.ResponseStatusCode,
+		ResourceType:         record.ResourceType,
+		ResourceID:           record.ResourceID,
+		Location:             record.Location,
+		ResponseBody:         append([]byte(nil), record.ResponseBody...),
+		CreatedAt:            record.CreatedAt,
 	}
 }
 

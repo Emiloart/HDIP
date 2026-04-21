@@ -31,10 +31,11 @@ var verificationBaseTime = time.Date(2026, time.April, 20, 9, 5, 0, 0, time.UTC)
 
 type phase1VerifierHandler struct {
 	verifierExtractor authctx.VerifierIntegratorExtractor
-	issuers           phase1.IssuerRecordRepository
+	trusts            phase1.TrustReadRepository
 	credentials       phase1.CredentialRecordRepository
 	requests          phase1.VerificationRequestRepository
 	results           phase1.VerificationResultRepository
+	idempotency       phase1.IdempotencyRecordRepository
 	audits            phase1.AuditRecordRepository
 }
 
@@ -83,10 +84,11 @@ func newPhase1VerifierHandler(runtimePath string) (*phase1VerifierHandler, error
 func newPhase1VerifierHandlerWithStore(store *phase1.RuntimeStore) *phase1VerifierHandler {
 	return &phase1VerifierHandler{
 		verifierExtractor: authctx.HeaderVerifierIntegratorExtractor{},
-		issuers:           store,
+		trusts:            store,
 		credentials:       store,
 		requests:          store,
 		results:           store,
+		idempotency:       store,
 		audits:            store,
 	}
 }
@@ -106,6 +108,15 @@ func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *htt
 	if err := request.validate(); err != nil {
 		httpx.WriteError(w, r.Context(), http.StatusBadRequest, "invalid_request", err.Error())
 		return
+	}
+
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	requestFingerprint := verificationSubmissionFingerprint(request)
+	if idempotencyKey != "" {
+		handled, ok := h.handleVerificationIdempotency(w, r, attribution, idempotencyKey, requestFingerprint)
+		if handled || !ok {
+			return
+		}
 	}
 
 	verificationID, err := h.requests.NextVerificationID(r.Context())
@@ -130,7 +141,7 @@ func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *htt
 		PolicyID:                  request.PolicyID,
 		RequestedAt:               evaluatedAt,
 		Actor:                     attribution,
-		IdempotencyKey:            strings.TrimSpace(r.Header.Get("Idempotency-Key")),
+		IdempotencyKey:            idempotencyKey,
 	}
 
 	if err := h.requests.CreateVerificationRequestRecord(r.Context(), verificationRequest); err != nil {
@@ -152,6 +163,29 @@ func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *htt
 			OccurredAt:     evaluatedAt,
 			ServiceName:    "verifier-api",
 		})
+		errorPayload := httpx.ErrorEnvelope{
+			Error: httpx.ErrorDetail{
+				Code:      "credential_not_found",
+				Message:   "submitted credential artifact did not resolve to a known credential",
+				RequestID: httpx.RequestIDFromContext(r.Context()),
+			},
+		}
+		if idempotencyKey != "" {
+			if storeErr := h.storeVerificationIdempotencyResponse(
+				r.Context(),
+				attribution,
+				idempotencyKey,
+				requestFingerprint,
+				http.StatusNotFound,
+				verificationRequest.VerificationID,
+				"",
+				errorPayload,
+				evaluatedAt,
+			); storeErr != nil {
+				httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "verification replay state could not be stored")
+				return
+			}
+		}
 		httpx.WriteError(w, r.Context(), http.StatusNotFound, "credential_not_found", "submitted credential artifact did not resolve to a known credential")
 		return
 	}
@@ -171,6 +205,33 @@ func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *htt
 		return
 	}
 
+	response := verificationResultPayload{
+		VerificationID:   verificationResult.VerificationID,
+		CredentialID:     verificationRequest.CredentialID,
+		IssuerID:         verificationResult.IssuerID,
+		Decision:         string(verificationResult.Decision),
+		ReasonCodes:      verificationResult.ReasonCodes,
+		EvaluatedAt:      verificationResult.EvaluatedAt,
+		CredentialStatus: string(verificationResult.CredentialStatus),
+	}
+	location := "/v1/verifier/verifications/" + verificationResult.VerificationID
+	if idempotencyKey != "" {
+		if err := h.storeVerificationIdempotencyResponse(
+			r.Context(),
+			attribution,
+			idempotencyKey,
+			requestFingerprint,
+			http.StatusCreated,
+			verificationResult.VerificationID,
+			location,
+			response,
+			evaluatedAt,
+		); err != nil {
+			httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "verification replay state could not be stored")
+			return
+		}
+	}
+
 	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
 		AuditID:        verifierAuditIDForAction(r, "create"),
 		Actor:          attribution,
@@ -184,16 +245,8 @@ func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *htt
 		ServiceName:    "verifier-api",
 	})
 
-	w.Header().Set("Location", "/v1/verifier/verifications/"+verificationResult.VerificationID)
-	httpx.WriteJSON(w, http.StatusCreated, verificationResultPayload{
-		VerificationID:   verificationResult.VerificationID,
-		CredentialID:     verificationRequest.CredentialID,
-		IssuerID:         verificationResult.IssuerID,
-		Decision:         string(verificationResult.Decision),
-		ReasonCodes:      verificationResult.ReasonCodes,
-		EvaluatedAt:      verificationResult.EvaluatedAt,
-		CredentialStatus: string(verificationResult.CredentialStatus),
-	})
+	w.Header().Set("Location", location)
+	httpx.WriteJSON(w, http.StatusCreated, response)
 }
 
 func (h *phase1VerifierHandler) getVerification(w http.ResponseWriter, r *http.Request) {
@@ -339,15 +392,15 @@ func (h *phase1VerifierHandler) evaluateVerification(
 	}
 
 	result.IssuerID = credentialRecord.IssuerID
-	issuerRecord, err := h.issuers.GetIssuerRecord(ctx, credentialRecord.IssuerID)
+	trustRecord, err := h.trusts.GetIssuerTrustRecord(ctx, credentialRecord.IssuerID)
 	if err != nil {
 		result.IssuerTrustState = "missing"
 		result.ReasonCodes = []string{"issuer_not_trusted"}
 		return result
 	}
 
-	result.IssuerTrustState = issuerRecord.TrustState
-	switch strings.TrimSpace(issuerRecord.TrustState) {
+	result.IssuerTrustState = trustRecord.TrustState
+	switch strings.TrimSpace(trustRecord.TrustState) {
 	case "active":
 	case "suspended":
 		result.ReasonCodes = []string{"issuer_suspended"}
@@ -474,6 +527,130 @@ func auditOutcomeForDecision(decision phase1.VerificationDecision) string {
 	}
 
 	return "succeeded"
+}
+
+func (h *phase1VerifierHandler) handleVerificationIdempotency(
+	w http.ResponseWriter,
+	r *http.Request,
+	attribution authctx.Attribution,
+	idempotencyKey string,
+	requestFingerprint string,
+) (handled bool, ok bool) {
+	record, err := h.idempotency.GetIdempotencyRecord(
+		r.Context(),
+		verifierCreateScope,
+		attribution.OrganizationID,
+		attribution.PrincipalID,
+		string(attribution.ActorType),
+		idempotencyKey,
+	)
+	if err != nil {
+		if errors.Is(err, phase1.ErrRecordNotFound) {
+			return false, true
+		}
+
+		httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "idempotency state could not be loaded")
+		return false, false
+	}
+
+	if record.RequestFingerprint != requestFingerprint {
+		_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
+			AuditID:        verifierAuditIDForAction(r, "idempotency-conflict"),
+			Actor:          attribution,
+			Action:         verifierCreateScope,
+			ResourceType:   "verification",
+			ResourceID:     record.ResourceID,
+			RequestID:      httpx.RequestIDFromContext(r.Context()),
+			IdempotencyKey: idempotencyKey,
+			Outcome:        "failed",
+			OccurredAt:     time.Now().UTC(),
+			ServiceName:    "verifier-api",
+		})
+		httpx.WriteError(w, r.Context(), http.StatusConflict, "idempotency_conflict", "Idempotency-Key is already bound to a different Phase 1 request")
+		return true, false
+	}
+
+	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
+		AuditID:        verifierAuditIDForAction(r, "idempotency-replay"),
+		Actor:          attribution,
+		Action:         verifierCreateScope,
+		ResourceType:   "verification",
+		ResourceID:     record.ResourceID,
+		RequestID:      httpx.RequestIDFromContext(r.Context()),
+		IdempotencyKey: idempotencyKey,
+		Outcome:        "replayed",
+		OccurredAt:     time.Now().UTC(),
+		ServiceName:    "verifier-api",
+	})
+	if record.Location != "" {
+		w.Header().Set("Location", record.Location)
+	}
+	writeStoredJSON(w, record.ResponseStatusCode, record.ResponseBody)
+	return true, false
+}
+
+func (h *phase1VerifierHandler) storeVerificationIdempotencyResponse(
+	ctx context.Context,
+	attribution authctx.Attribution,
+	idempotencyKey string,
+	requestFingerprint string,
+	statusCode int,
+	verificationID string,
+	location string,
+	response any,
+	createdAt time.Time,
+) error {
+	rawResponse, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+
+	return h.idempotency.CreateIdempotencyRecord(ctx, phase1.IdempotencyRecord{
+		Operation:            verifierCreateScope,
+		CallerPrincipalID:    attribution.PrincipalID,
+		CallerOrganizationID: attribution.OrganizationID,
+		CallerActorType:      string(attribution.ActorType),
+		IdempotencyKey:       idempotencyKey,
+		RequestFingerprint:   requestFingerprint,
+		ResponseStatusCode:   statusCode,
+		ResourceType:         "verification",
+		ResourceID:           verificationID,
+		Location:             location,
+		ResponseBody:         rawResponse,
+		CreatedAt:            createdAt,
+	})
+}
+
+func verificationSubmissionFingerprint(request verificationSubmissionRequestPayload) string {
+	return fingerprintValue(struct {
+		PolicyID                 string `json:"policyId"`
+		CredentialID             string `json:"credentialId"`
+		CredentialArtifactKind   string `json:"credentialArtifactKind"`
+		CredentialArtifactDigest string `json:"credentialArtifactDigest"`
+		CredentialArtifactType   string `json:"credentialArtifactMediaType"`
+	}{
+		PolicyID:                 strings.TrimSpace(request.PolicyID),
+		CredentialID:             strings.TrimSpace(request.CredentialID),
+		CredentialArtifactKind:   strings.TrimSpace(request.CredentialArtifact.Kind),
+		CredentialArtifactDigest: artifactDigest(strings.TrimSpace(request.CredentialArtifact.Value)),
+		CredentialArtifactType:   strings.TrimSpace(request.CredentialArtifact.MediaType),
+	})
+}
+
+func fingerprintValue(value any) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func writeStoredJSON(w http.ResponseWriter, statusCode int, payload json.RawMessage) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(statusCode)
+	_, _ = w.Write(payload)
 }
 
 func defaultVerifierIssuerRecord() phase1.IssuerRecord {

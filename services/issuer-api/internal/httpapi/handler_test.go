@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -255,6 +256,92 @@ func TestPhase1IssueCredentialPersistsDeterministicArtifactAndAudits(t *testing.
 	}
 }
 
+func TestPhase1IssueCredentialReplayReturnsOriginalResult(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+	body := loadFixtureText(t, "schemas/examples/issuer/issuance-request.hdip-passport-basic.json")
+
+	firstRequest := httptest.NewRequest(http.MethodPost, "/v1/issuer/credentials", strings.NewReader(body))
+	firstRequest.Header.Set("Idempotency-Key", "issue-replay-1")
+	setIssuerPhase1Headers(firstRequest, []string{issuerIssueScope})
+	firstRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstRecorder, firstRequest)
+	if firstRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", firstRecorder.Code)
+	}
+
+	secondRequest := httptest.NewRequest(http.MethodPost, "/v1/issuer/credentials", strings.NewReader(body))
+	secondRequest.Header.Set("Idempotency-Key", "issue-replay-1")
+	setIssuerPhase1Headers(secondRequest, []string{issuerIssueScope})
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, secondRequest)
+	if secondRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected replay 201, got %d", secondRecorder.Code)
+	}
+
+	assertJSONEqual(t, firstRecorder.Body.Bytes(), secondRecorder.Body.Bytes())
+
+	records, err := store.IdempotencyRecords()
+	if err != nil {
+		t.Fatalf("load idempotency records: %v", err)
+	}
+
+	if len(records) != 1 {
+		t.Fatalf("expected 1 idempotency record, got %d", len(records))
+	}
+
+	if strings.Contains(string(records[0].ResponseBody), "fullLegalName") || strings.Contains(string(records[0].ResponseBody), "Alex Example") {
+		t.Fatalf("expected bounded replay snapshot, got %s", string(records[0].ResponseBody))
+	}
+
+	audits, err := store.AuditRecords()
+	if err != nil {
+		t.Fatalf("load audit records: %v", err)
+	}
+
+	if len(audits) != 2 {
+		t.Fatalf("expected 2 audit records, got %d", len(audits))
+	}
+
+	if audits[1].Outcome != "replayed" {
+		t.Fatalf("expected replay audit outcome, got %+v", audits[1])
+	}
+}
+
+func TestPhase1IssueCredentialReplayConflictFailsCleanly(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+	originalBody := loadFixtureText(t, "schemas/examples/issuer/issuance-request.hdip-passport-basic.json")
+	conflictingBody := strings.ReplaceAll(originalBody, "\"subject_ref_alex_example\"", "\"subject_ref_conflict_example\"")
+
+	firstRequest := httptest.NewRequest(http.MethodPost, "/v1/issuer/credentials", strings.NewReader(originalBody))
+	firstRequest.Header.Set("Idempotency-Key", "issue-conflict-1")
+	setIssuerPhase1Headers(firstRequest, []string{issuerIssueScope})
+	firstRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstRecorder, firstRequest)
+	if firstRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", firstRecorder.Code)
+	}
+
+	secondRequest := httptest.NewRequest(http.MethodPost, "/v1/issuer/credentials", strings.NewReader(conflictingBody))
+	secondRequest.Header.Set("Idempotency-Key", "issue-conflict-1")
+	setIssuerPhase1Headers(secondRequest, []string{issuerIssueScope})
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, secondRequest)
+	if secondRecorder.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", secondRecorder.Code)
+	}
+
+	var response httpx.ErrorEnvelope
+	if err := json.Unmarshal(secondRecorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Error.Code != "idempotency_conflict" {
+		t.Fatalf("unexpected error response: %+v", response)
+	}
+}
+
 func TestPhase1UpdateCredentialStatusHandler(t *testing.T) {
 	store := newIssuerStoreWithDefaults(t)
 	handler := newTestIssuerHandlerWithStore(t, store)
@@ -342,6 +429,74 @@ func TestPhase1UpdateCredentialStatusRejectsInvalidTransition(t *testing.T) {
 	)
 }
 
+func TestPhase1UpdateCredentialStatusReplayReturnsOriginalResult(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+	credentialID := issueCredentialForIssuerTest(t, handler)
+	body := loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.revoked.json")
+
+	firstRequest := httptest.NewRequest(http.MethodPost, "/v1/issuer/credentials/"+credentialID+"/status", strings.NewReader(body))
+	firstRequest.Header.Set("Idempotency-Key", "status-replay-1")
+	setIssuerPhase1Headers(firstRequest, []string{issuerStatusWriteScope})
+	firstRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstRecorder, firstRequest)
+	if firstRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", firstRecorder.Code)
+	}
+
+	secondRequest := httptest.NewRequest(http.MethodPost, "/v1/issuer/credentials/"+credentialID+"/status", strings.NewReader(body))
+	secondRequest.Header.Set("Idempotency-Key", "status-replay-1")
+	setIssuerPhase1Headers(secondRequest, []string{issuerStatusWriteScope})
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, secondRequest)
+	if secondRecorder.Code != http.StatusOK {
+		t.Fatalf("expected replay 200, got %d", secondRecorder.Code)
+	}
+
+	assertJSONEqual(t, firstRecorder.Body.Bytes(), secondRecorder.Body.Bytes())
+}
+
+func TestPhase1UpdateCredentialStatusReplayConflictFailsCleanly(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+	credentialID := issueCredentialForIssuerTest(t, handler)
+
+	firstRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials/"+credentialID+"/status",
+		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.revoked.json")),
+	)
+	firstRequest.Header.Set("Idempotency-Key", "status-conflict-1")
+	setIssuerPhase1Headers(firstRequest, []string{issuerStatusWriteScope})
+	firstRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstRecorder, firstRequest)
+	if firstRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", firstRecorder.Code)
+	}
+
+	secondRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials/"+credentialID+"/status",
+		strings.NewReader(`{"status":"superseded","supersededByCredentialId":"cred_hdip_passport_basic_002"}`),
+	)
+	secondRequest.Header.Set("Idempotency-Key", "status-conflict-1")
+	setIssuerPhase1Headers(secondRequest, []string{issuerStatusWriteScope})
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, secondRequest)
+	if secondRecorder.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", secondRecorder.Code)
+	}
+
+	var response httpx.ErrorEnvelope
+	if err := json.Unmarshal(secondRecorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Error.Code != "idempotency_conflict" {
+		t.Fatalf("unexpected error response: %+v", response)
+	}
+}
+
 func TestPhase1UpdateCredentialStatusRejectsMissingAuth(t *testing.T) {
 	store := newIssuerStoreWithDefaults(t)
 	handler := newTestIssuerHandlerWithStore(t, store)
@@ -421,7 +576,7 @@ func newTestIssuerHandlerWithStore(t *testing.T, store *phase1.RuntimeStore) htt
 func newIssuerStoreWithDefaults(t *testing.T) *phase1.RuntimeStore {
 	t.Helper()
 
-	store, err := phase1.OpenRuntimeStore(filepath.Join(t.TempDir(), "issuer-phase1-runtime.sqlite"))
+	store, err := phase1.OpenRuntimeStore(filepath.Join(t.TempDir(), "issuer-phase1-state.json"))
 	if err != nil {
 		t.Fatalf("open runtime store: %v", err)
 	}
@@ -447,7 +602,7 @@ func testIssuerConfig(t *testing.T) config.Config {
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
-		Phase1RuntimePath: filepath.Join(t.TempDir(), "issuer-phase1-runtime.sqlite"),
+		Phase1StatePath:   filepath.Join(t.TempDir(), "issuer-phase1-state.json"),
 		BuildVersion:      "test",
 	}
 }
@@ -518,5 +673,23 @@ func updateCredentialStatusForIssuerTest(
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != expectedStatus {
 		t.Fatalf("expected %d, got %d", expectedStatus, recorder.Code)
+	}
+}
+
+func assertJSONEqual(t *testing.T, expected []byte, actual []byte) {
+	t.Helper()
+
+	var expectedValue any
+	if err := json.Unmarshal(expected, &expectedValue); err != nil {
+		t.Fatalf("unmarshal expected json: %v", err)
+	}
+
+	var actualValue any
+	if err := json.Unmarshal(actual, &actualValue); err != nil {
+		t.Fatalf("unmarshal actual json: %v", err)
+	}
+
+	if expectedJSON, actualJSON := expectedValue, actualValue; !reflect.DeepEqual(expectedJSON, actualJSON) {
+		t.Fatalf("unexpected json body\nexpected: %#v\nactual: %#v", expectedJSON, actualJSON)
 	}
 }
