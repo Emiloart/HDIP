@@ -29,6 +29,7 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
+		Phase1RuntimePath: "phase1-runtime.sqlite",
 		BuildVersion:      "dev",
 	}
 

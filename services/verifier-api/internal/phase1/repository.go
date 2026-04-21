@@ -27,6 +27,15 @@ const (
 	CredentialStatusSnapshotExpired    CredentialStatusSnapshot = "expired"
 )
 
+type CredentialRecord struct {
+	CredentialID   string
+	IssuerID       string
+	TemplateID     string
+	ArtifactDigest string
+	ExpiresAt      time.Time
+	Status         CredentialStatusSnapshot
+}
+
 type IssuerRecord struct {
 	IssuerID                  string
 	DisplayName               string
@@ -50,6 +59,7 @@ type VerificationRequestRecord struct {
 
 type VerificationResultRecord struct {
 	VerificationID   string
+	IssuerID         string
 	Decision         VerificationDecision
 	ReasonCodes      []string
 	IssuerTrustState string
@@ -75,7 +85,13 @@ type IssuerRecordRepository interface {
 	GetIssuerRecord(ctx context.Context, issuerID string) (IssuerRecord, error)
 }
 
+type CredentialRecordRepository interface {
+	GetCredentialRecord(ctx context.Context, credentialID string) (CredentialRecord, error)
+	GetCredentialRecordByArtifactDigest(ctx context.Context, artifactDigest string) (CredentialRecord, error)
+}
+
 type VerificationRequestRepository interface {
+	NextVerificationID(ctx context.Context) (string, error)
 	CreateVerificationRequestRecord(ctx context.Context, record VerificationRequestRecord) error
 	GetVerificationRequestRecord(ctx context.Context, verificationID string) (VerificationRequestRecord, error)
 }

@@ -8,9 +8,17 @@ import (
 	"github.com/Emiloart/HDIP/services/issuer-api/internal/config"
 )
 
-func NewMux(logger *slog.Logger, cfg config.Config) http.Handler {
+func NewMux(logger *slog.Logger, cfg config.Config) (http.Handler, error) {
+	phase1Handler, err := newPhase1IssuerHandler(cfg.Phase1RuntimePath)
+	if err != nil {
+		return nil, err
+	}
+
+	return newMuxWithPhase1Handler(logger, cfg, phase1Handler), nil
+}
+
+func newMuxWithPhase1Handler(logger *slog.Logger, cfg config.Config, phase1Handler *phase1IssuerHandler) http.Handler {
 	mux := http.NewServeMux()
-	phase1Handler := newPhase1IssuerHandler()
 	mux.Handle("/healthz", httpx.HealthHandler(cfg.ServiceName, cfg.BuildVersion))
 	mux.Handle("/readyz", httpx.ReadyHandler(cfg.ServiceName, cfg.BuildVersion))
 	mux.HandleFunc("GET /v1/issuer/profile", func(w http.ResponseWriter, r *http.Request) {
@@ -18,6 +26,7 @@ func NewMux(logger *slog.Logger, cfg config.Config) http.Handler {
 	})
 	mux.HandleFunc("POST /v1/issuer/credentials", phase1Handler.issueCredential)
 	mux.HandleFunc("GET /v1/issuer/credentials/{credentialId}", phase1Handler.getCredential)
+	mux.HandleFunc("POST /v1/issuer/credentials/{credentialId}/status", phase1Handler.updateCredentialStatus)
 	mux.HandleFunc("GET /v1/issuer/templates/{templateId}", func(w http.ResponseWriter, r *http.Request) {
 		templateID := r.PathValue("templateId")
 		template, ok := stubCredentialTemplate(templateID)

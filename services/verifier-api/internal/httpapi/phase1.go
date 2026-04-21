@@ -1,8 +1,14 @@
 package httpapi
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,18 +18,21 @@ import (
 )
 
 const (
-	verifierCreateScope        = "verifier.requests.create"
-	verifierReadScope          = "verifier.results.read"
-	placeholderVerificationID  = "verification_hdip_001"
-	placeholderVerificationDID = "did:web:issuer.hdip.dev"
-	placeholderArtifactHash    = "4262d0aacabb3bd709a5cd7abb52c0eb8be0d15d02f1e8e2e11c45bc5071502e"
+	verifierCreateScope         = "verifier.requests.create"
+	verifierReadScope           = "verifier.results.read"
+	defaultPhase1IssuerID       = "did:web:issuer.hdip.dev"
+	credentialArtifactKind      = "phase1_opaque_artifact"
+	credentialArtifactMediaType = "application/vnd.hdip.phase1-opaque-artifact"
+	credentialArtifactPrefix    = "opaque-artifact:v1:"
+	responseVersion             = "2026.04"
 )
 
-var placeholderEvaluatedAt = time.Date(2026, time.April, 20, 9, 5, 0, 0, time.UTC)
+var verificationBaseTime = time.Date(2026, time.April, 20, 9, 5, 0, 0, time.UTC)
 
 type phase1VerifierHandler struct {
 	verifierExtractor authctx.VerifierIntegratorExtractor
 	issuers           phase1.IssuerRecordRepository
+	credentials       phase1.CredentialRecordRepository
 	requests          phase1.VerificationRequestRepository
 	results           phase1.VerificationResultRepository
 	audits            phase1.AuditRecordRepository
@@ -51,11 +60,31 @@ type verificationResultPayload struct {
 	CredentialStatus string    `json:"credentialStatus"`
 }
 
-func newPhase1VerifierHandler() *phase1VerifierHandler {
-	store := phase1.NewInMemoryStore()
+type credentialArtifactEnvelope struct {
+	CredentialID string `json:"credentialId"`
+	IssuerID     string `json:"issuerId"`
+	TemplateID   string `json:"templateId"`
+	ExpiresAt    string `json:"expiresAt"`
+}
+
+func newPhase1VerifierHandler(runtimePath string) (*phase1VerifierHandler, error) {
+	store, err := phase1.OpenRuntimeStore(runtimePath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := store.SeedIssuerRecord(defaultVerifierIssuerRecord()); err != nil {
+		return nil, err
+	}
+
+	return newPhase1VerifierHandlerWithStore(store), nil
+}
+
+func newPhase1VerifierHandlerWithStore(store *phase1.RuntimeStore) *phase1VerifierHandler {
 	return &phase1VerifierHandler{
 		verifierExtractor: authctx.HeaderVerifierIntegratorExtractor{},
 		issuers:           store,
+		credentials:       store,
 		requests:          store,
 		results:           store,
 		audits:            store,
@@ -79,19 +108,27 @@ func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *htt
 		return
 	}
 
-	issuerRecord, err := h.issuers.GetIssuerRecord(r.Context(), placeholderVerificationDID)
+	verificationID, err := h.requests.NextVerificationID(r.Context())
 	if err != nil {
-		httpx.WriteError(w, r.Context(), http.StatusForbidden, "issuer_not_trusted", "issuer trust context is not available")
+		httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "verification identifier could not be allocated")
 		return
 	}
 
+	evaluatedAt := evaluatedAtForVerificationID(verificationID)
+	artifactEnvelope, err := parseCredentialArtifact(request.CredentialArtifact)
+	if err != nil {
+		httpx.WriteError(w, r.Context(), http.StatusBadRequest, "invalid_request", "credentialArtifact.value must match the deterministic Phase 1 opaque artifact format")
+		return
+	}
+
+	submittedArtifactDigest := artifactDigest(request.CredentialArtifact.Value)
 	verificationRequest := phase1.VerificationRequestRecord{
-		VerificationID:            placeholderVerificationID,
+		VerificationID:            verificationID,
 		VerifierID:                attribution.OrganizationID,
-		SubmittedCredentialDigest: placeholderArtifactHash,
-		CredentialID:              request.CredentialID,
+		SubmittedCredentialDigest: submittedArtifactDigest,
+		CredentialID:              artifactEnvelope.CredentialID,
 		PolicyID:                  request.PolicyID,
-		RequestedAt:               placeholderEvaluatedAt,
+		RequestedAt:               evaluatedAt,
 		Actor:                     attribution,
 		IdempotencyKey:            strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 	}
@@ -101,15 +138,33 @@ func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *htt
 		return
 	}
 
-	verificationResult := phase1.VerificationResultRecord{
-		VerificationID:   placeholderVerificationID,
-		Decision:         phase1.VerificationDecisionAllow,
-		ReasonCodes:      []string{"issuer_trusted", "credential_status_active", "template_match"},
-		IssuerTrustState: issuerRecord.TrustState,
-		CredentialStatus: phase1.CredentialStatusSnapshotActive,
-		EvaluatedAt:      placeholderEvaluatedAt,
-		ResponseVersion:  "2026.04",
+	credentialRecord, resolvedByDigest, err := h.resolveCredentialRecord(r.Context(), verificationRequest, artifactEnvelope)
+	if err != nil {
+		_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
+			AuditID:        verifierAuditIDForAction(r, "create"),
+			Actor:          attribution,
+			Action:         verifierCreateScope,
+			ResourceType:   "verification",
+			ResourceID:     verificationRequest.VerificationID,
+			RequestID:      httpx.RequestIDFromContext(r.Context()),
+			IdempotencyKey: verificationRequest.IdempotencyKey,
+			Outcome:        "failed",
+			OccurredAt:     evaluatedAt,
+			ServiceName:    "verifier-api",
+		})
+		httpx.WriteError(w, r.Context(), http.StatusNotFound, "credential_not_found", "submitted credential artifact did not resolve to a known credential")
+		return
 	}
+
+	verificationResult := h.evaluateVerification(
+		r.Context(),
+		request,
+		artifactEnvelope,
+		credentialRecord,
+		resolvedByDigest,
+		verificationRequest.VerificationID,
+		evaluatedAt,
+	)
 
 	if err := h.results.CreateVerificationResultRecord(r.Context(), verificationResult); err != nil {
 		httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "verification result could not be stored")
@@ -124,8 +179,8 @@ func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *htt
 		ResourceID:     verificationResult.VerificationID,
 		RequestID:      httpx.RequestIDFromContext(r.Context()),
 		IdempotencyKey: verificationRequest.IdempotencyKey,
-		Outcome:        "succeeded",
-		OccurredAt:     placeholderEvaluatedAt,
+		Outcome:        auditOutcomeForDecision(verificationResult.Decision),
+		OccurredAt:     evaluatedAt,
 		ServiceName:    "verifier-api",
 	})
 
@@ -133,7 +188,7 @@ func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *htt
 	httpx.WriteJSON(w, http.StatusCreated, verificationResultPayload{
 		VerificationID:   verificationResult.VerificationID,
 		CredentialID:     verificationRequest.CredentialID,
-		IssuerID:         issuerRecord.IssuerID,
+		IssuerID:         verificationResult.IssuerID,
 		Decision:         string(verificationResult.Decision),
 		ReasonCodes:      verificationResult.ReasonCodes,
 		EvaluatedAt:      verificationResult.EvaluatedAt,
@@ -158,6 +213,11 @@ func (h *phase1VerifierHandler) getVerification(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	if requestRecord.VerifierID != attribution.OrganizationID {
+		httpx.WriteError(w, r.Context(), http.StatusNotFound, "verification_not_found", "verification record not found")
+		return
+	}
+
 	resultRecord, err := h.results.GetVerificationResultRecord(r.Context(), requestRecord.VerificationID)
 	if err != nil {
 		if errors.Is(err, phase1.ErrRecordNotFound) {
@@ -178,14 +238,14 @@ func (h *phase1VerifierHandler) getVerification(w http.ResponseWriter, r *http.R
 		RequestID:      httpx.RequestIDFromContext(r.Context()),
 		IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 		Outcome:        "succeeded",
-		OccurredAt:     placeholderEvaluatedAt,
+		OccurredAt:     time.Now().UTC(),
 		ServiceName:    "verifier-api",
 	})
 
 	httpx.WriteJSON(w, http.StatusOK, verificationResultPayload{
 		VerificationID:   resultRecord.VerificationID,
 		CredentialID:     requestRecord.CredentialID,
-		IssuerID:         placeholderVerificationDID,
+		IssuerID:         resultRecord.IssuerID,
 		Decision:         string(resultRecord.Decision),
 		ReasonCodes:      resultRecord.ReasonCodes,
 		EvaluatedAt:      resultRecord.EvaluatedAt,
@@ -212,10 +272,10 @@ func (p verificationSubmissionRequestPayload) validate() error {
 	switch {
 	case strings.TrimSpace(p.PolicyID) == "":
 		return errors.New("policyId must not be empty")
-	case strings.TrimSpace(p.CredentialArtifact.Kind) == "":
-		return errors.New("credentialArtifact.kind must not be empty")
-	case strings.TrimSpace(p.CredentialArtifact.MediaType) == "":
-		return errors.New("credentialArtifact.mediaType must not be empty")
+	case strings.TrimSpace(p.CredentialArtifact.Kind) != credentialArtifactKind:
+		return errors.New("credentialArtifact.kind must match the deterministic Phase 1 opaque artifact kind")
+	case strings.TrimSpace(p.CredentialArtifact.MediaType) != credentialArtifactMediaType:
+		return errors.New("credentialArtifact.mediaType must match the deterministic Phase 1 opaque artifact media type")
 	case strings.TrimSpace(p.CredentialArtifact.Value) == "":
 		return errors.New("credentialArtifact.value must not be empty")
 	default:
@@ -225,4 +285,219 @@ func (p verificationSubmissionRequestPayload) validate() error {
 
 func verifierAuditIDForAction(r *http.Request, action string) string {
 	return httpx.RequestIDFromContext(r.Context()) + ":" + action
+}
+
+func (h *phase1VerifierHandler) resolveCredentialRecord(
+	ctx context.Context,
+	requestRecord phase1.VerificationRequestRecord,
+	artifactEnvelope credentialArtifactEnvelope,
+) (phase1.CredentialRecord, bool, error) {
+	credentialRecord, err := h.credentials.GetCredentialRecordByArtifactDigest(ctx, requestRecord.SubmittedCredentialDigest)
+	if err == nil {
+		return credentialRecord, true, nil
+	}
+
+	credentialRecord, err = h.credentials.GetCredentialRecord(ctx, artifactEnvelope.CredentialID)
+	if err == nil {
+		return credentialRecord, false, nil
+	}
+
+	return phase1.CredentialRecord{}, false, err
+}
+
+func (h *phase1VerifierHandler) evaluateVerification(
+	ctx context.Context,
+	request verificationSubmissionRequestPayload,
+	artifactEnvelope credentialArtifactEnvelope,
+	credentialRecord phase1.CredentialRecord,
+	resolvedByDigest bool,
+	verificationID string,
+	evaluatedAt time.Time,
+) phase1.VerificationResultRecord {
+	credentialStatus := credentialStatusForEvaluation(credentialRecord, evaluatedAt)
+	result := phase1.VerificationResultRecord{
+		VerificationID:   verificationID,
+		IssuerID:         artifactEnvelope.IssuerID,
+		Decision:         phase1.VerificationDecisionDeny,
+		ReasonCodes:      []string{"artifact_continuity_failed"},
+		CredentialStatus: credentialStatus,
+		EvaluatedAt:      evaluatedAt,
+		ResponseVersion:  responseVersion,
+	}
+
+	if request.CredentialID != "" && strings.TrimSpace(request.CredentialID) != artifactEnvelope.CredentialID {
+		result.ReasonCodes = []string{"credential_id_mismatch"}
+		return result
+	}
+
+	if !resolvedByDigest ||
+		artifactEnvelope.CredentialID != credentialRecord.CredentialID ||
+		artifactEnvelope.IssuerID != credentialRecord.IssuerID ||
+		artifactEnvelope.TemplateID != credentialRecord.TemplateID ||
+		artifactEnvelope.ExpiresAt != credentialRecord.ExpiresAt.UTC().Format(time.RFC3339) {
+		return result
+	}
+
+	result.IssuerID = credentialRecord.IssuerID
+	issuerRecord, err := h.issuers.GetIssuerRecord(ctx, credentialRecord.IssuerID)
+	if err != nil {
+		result.IssuerTrustState = "missing"
+		result.ReasonCodes = []string{"issuer_not_trusted"}
+		return result
+	}
+
+	result.IssuerTrustState = issuerRecord.TrustState
+	switch strings.TrimSpace(issuerRecord.TrustState) {
+	case "active":
+	case "suspended":
+		result.ReasonCodes = []string{"issuer_suspended"}
+		return result
+	default:
+		result.ReasonCodes = []string{"issuer_not_trusted"}
+		return result
+	}
+
+	switch credentialStatus {
+	case phase1.CredentialStatusSnapshotRevoked:
+		result.ReasonCodes = []string{"credential_status_revoked"}
+		return result
+	case phase1.CredentialStatusSnapshotSuperseded:
+		result.ReasonCodes = []string{"credential_status_superseded"}
+		return result
+	case phase1.CredentialStatusSnapshotExpired:
+		result.ReasonCodes = []string{"credential_expired"}
+		return result
+	}
+
+	if !isPolicyCompatible(request.PolicyID, credentialRecord.TemplateID) {
+		result.ReasonCodes = []string{"template_mismatch"}
+		return result
+	}
+
+	result.Decision = phase1.VerificationDecisionAllow
+	result.ReasonCodes = []string{"issuer_trusted", "credential_status_active", "template_match"}
+	return result
+}
+
+func parseCredentialArtifact(artifact verifierCredentialArtifactPayload) (credentialArtifactEnvelope, error) {
+	rawValue := strings.TrimSpace(artifact.Value)
+	if !strings.HasPrefix(rawValue, credentialArtifactPrefix) {
+		return credentialArtifactEnvelope{}, errors.New("artifact prefix mismatch")
+	}
+
+	rawEnvelope, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(rawValue, credentialArtifactPrefix))
+	if err != nil {
+		return credentialArtifactEnvelope{}, err
+	}
+
+	var envelope credentialArtifactEnvelope
+	if err := json.Unmarshal(rawEnvelope, &envelope); err != nil {
+		return credentialArtifactEnvelope{}, err
+	}
+
+	switch {
+	case strings.TrimSpace(envelope.CredentialID) == "":
+		return credentialArtifactEnvelope{}, errors.New("artifact credentialId missing")
+	case strings.TrimSpace(envelope.IssuerID) == "":
+		return credentialArtifactEnvelope{}, errors.New("artifact issuerId missing")
+	case strings.TrimSpace(envelope.TemplateID) == "":
+		return credentialArtifactEnvelope{}, errors.New("artifact templateId missing")
+	case !isRFC3339(envelope.ExpiresAt):
+		return credentialArtifactEnvelope{}, errors.New("artifact expiresAt invalid")
+	default:
+		return envelope, nil
+	}
+}
+
+func materializeCredentialArtifactValue(credentialID, issuerID, templateID string, expiresAt time.Time) string {
+	envelope := credentialArtifactEnvelope{
+		CredentialID: credentialID,
+		IssuerID:     issuerID,
+		TemplateID:   templateID,
+		ExpiresAt:    expiresAt.UTC().Format(time.RFC3339),
+	}
+
+	raw, err := json.Marshal(envelope)
+	if err != nil {
+		panic(err)
+	}
+
+	return credentialArtifactPrefix + base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func artifactDigest(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func evaluatedAtForVerificationID(verificationID string) time.Time {
+	parts := strings.Split(verificationID, "_")
+	if len(parts) == 0 {
+		return verificationBaseTime
+	}
+
+	sequence, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil || sequence <= 0 {
+		return verificationBaseTime
+	}
+
+	return verificationBaseTime.Add(time.Duration(sequence-1) * time.Minute)
+}
+
+func credentialStatusForEvaluation(record phase1.CredentialRecord, evaluatedAt time.Time) phase1.CredentialStatusSnapshot {
+	switch record.Status {
+	case phase1.CredentialStatusSnapshotRevoked:
+		return phase1.CredentialStatusSnapshotRevoked
+	case phase1.CredentialStatusSnapshotSuperseded:
+		return phase1.CredentialStatusSnapshotSuperseded
+	}
+
+	if !record.ExpiresAt.IsZero() && evaluatedAt.After(record.ExpiresAt) {
+		return phase1.CredentialStatusSnapshotExpired
+	}
+
+	return phase1.CredentialStatusSnapshotActive
+}
+
+func isPolicyCompatible(policyID string, templateID string) bool {
+	return strings.TrimSpace(policyID) == defaultPolicyID && strings.TrimSpace(templateID) == defaultTemplateID
+}
+
+func isRFC3339(value string) bool {
+	_, err := time.Parse(time.RFC3339, value)
+	return err == nil
+}
+
+func auditOutcomeForDecision(decision phase1.VerificationDecision) string {
+	if decision == phase1.VerificationDecisionDeny {
+		return "denied"
+	}
+
+	return "succeeded"
+}
+
+func defaultVerifierIssuerRecord() phase1.IssuerRecord {
+	now := time.Date(2026, time.April, 20, 9, 0, 0, 0, time.UTC)
+	return phase1.IssuerRecord{
+		IssuerID:                  defaultPhase1IssuerID,
+		DisplayName:               "HDIP Passport Issuer",
+		TrustState:                "active",
+		AllowedTemplateIDs:        []string{defaultTemplateID},
+		VerificationKeyReferences: []string{"key:issuer.hdip.dev:2026-04"},
+		CreatedAt:                 now,
+		UpdatedAt:                 now,
+	}
+}
+
+func defaultVerifierCredentialRecord() phase1.CredentialRecord {
+	expiresAt := time.Date(2027, time.April, 20, 9, 0, 0, 0, time.UTC)
+	value := materializeCredentialArtifactValue("cred_hdip_passport_basic_001", defaultPhase1IssuerID, defaultTemplateID, expiresAt)
+	return phase1.CredentialRecord{
+		CredentialID:   "cred_hdip_passport_basic_001",
+		IssuerID:       defaultPhase1IssuerID,
+		TemplateID:     defaultTemplateID,
+		ArtifactDigest: artifactDigest(value),
+		ExpiresAt:      expiresAt,
+		Status:         phase1.CredentialStatusSnapshotActive,
+	}
 }

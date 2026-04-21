@@ -1,8 +1,13 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,15 +17,16 @@ import (
 )
 
 const (
-	issuerIssueScope        = "issuer.credentials.issue"
-	issuerReadScope         = "issuer.credentials.read"
-	placeholderCredentialID = "cred_hdip_passport_basic_001"
-	placeholderArtifactHash = "4262d0aacabb3bd709a5cd7abb52c0eb8be0d15d02f1e8e2e11c45bc5071502e"
+	issuerIssueScope            = "issuer.credentials.issue"
+	issuerReadScope             = "issuer.credentials.read"
+	issuerStatusWriteScope      = "issuer.credentials.status.write"
+	defaultPhase1IssuerID       = "did:web:issuer.hdip.dev"
+	credentialArtifactKind      = "phase1_opaque_artifact"
+	credentialArtifactMediaType = "application/vnd.hdip.phase1-opaque-artifact"
+	credentialArtifactPrefix    = "opaque-artifact:v1:"
 )
 
-var (
-	placeholderIssuedAt = time.Date(2026, time.April, 20, 9, 0, 0, 0, time.UTC)
-)
+var isoCountryCodePattern = regexp.MustCompile(`^[A-Z]{2}$`)
 
 type phase1IssuerHandler struct {
 	issuerExtractor authctx.IssuerOperatorExtractor
@@ -79,8 +85,34 @@ type credentialRecordPayload struct {
 	ArtifactReference        string                     `json:"artifactReference,omitempty"`
 }
 
-func newPhase1IssuerHandler() *phase1IssuerHandler {
-	store := phase1.NewInMemoryStore()
+type credentialStatusUpdateRequestPayload struct {
+	Status                   string `json:"status"`
+	SupersededByCredentialID string `json:"supersededByCredentialId,omitempty"`
+}
+
+type credentialStatusPayload struct {
+	CredentialID             string    `json:"credentialId"`
+	Status                   string    `json:"status"`
+	StatusReference          string    `json:"statusReference"`
+	StatusUpdatedAt          time.Time `json:"statusUpdatedAt"`
+	ExpiresAt                time.Time `json:"expiresAt"`
+	SupersededByCredentialID string    `json:"supersededByCredentialId,omitempty"`
+}
+
+func newPhase1IssuerHandler(runtimePath string) (*phase1IssuerHandler, error) {
+	store, err := phase1.OpenRuntimeStore(runtimePath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := store.SeedIssuerRecord(defaultIssuerRecord()); err != nil {
+		return nil, err
+	}
+
+	return newPhase1IssuerHandlerWithStore(store), nil
+}
+
+func newPhase1IssuerHandlerWithStore(store *phase1.RuntimeStore) *phase1IssuerHandler {
 	return &phase1IssuerHandler{
 		issuerExtractor: authctx.HeaderIssuerOperatorExtractor{},
 		issuers:         store,
@@ -117,8 +149,22 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	credentialID, err := h.credentials.NextCredentialID(r.Context(), request.TemplateID)
+	if err != nil {
+		httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "credential identifier could not be allocated")
+		return
+	}
+
+	issuedAt := request.Claims.VerifiedAt.UTC()
+	expiresAt := request.Claims.ExpiresAt.UTC()
+	credentialArtifact, err := materializeCredentialArtifact(credentialID, issuerRecord.IssuerID, request.TemplateID, expiresAt)
+	if err != nil {
+		httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "artifact_materialization_failed", "credential artifact could not be materialized")
+		return
+	}
+
 	record := phase1.CredentialRecord{
-		CredentialID:     placeholderCredentialID,
+		CredentialID:     credentialID,
 		IssuerID:         issuerRecord.IssuerID,
 		TemplateID:       request.TemplateID,
 		SubjectReference: request.SubjectReference,
@@ -128,20 +174,16 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 			CountryOfResidence: request.Claims.CountryOfResidence,
 			DocumentCountry:    request.Claims.DocumentCountry,
 			KYCLevel:           request.Claims.KYCLevel,
-			VerifiedAt:         request.Claims.VerifiedAt,
-			ExpiresAt:          request.Claims.ExpiresAt,
+			VerifiedAt:         issuedAt,
+			ExpiresAt:          expiresAt,
 		},
-		ArtifactDigest: placeholderArtifactHash,
-		CredentialArtifact: &phase1.CredentialArtifact{
-			Kind:      "phase1_opaque_artifact",
-			MediaType: "application/vnd.hdip.phase1-opaque-artifact",
-			Value:     "opaque-artifact:cred_hdip_passport_basic_001:v1",
-		},
-		Status:          phase1.CredentialStatusActive,
-		StatusReference: statusReferenceForCredential(placeholderCredentialID),
-		IssuedAt:        placeholderIssuedAt,
-		ExpiresAt:       request.Claims.ExpiresAt,
-		StatusUpdatedAt: placeholderIssuedAt,
+		ArtifactDigest:     artifactDigest(credentialArtifact.Value),
+		CredentialArtifact: &credentialArtifact,
+		Status:             phase1.CredentialStatusActive,
+		StatusReference:    statusReferenceForCredential(credentialID),
+		IssuedAt:           issuedAt,
+		ExpiresAt:          expiresAt,
+		StatusUpdatedAt:    issuedAt,
 	}
 
 	if err := h.credentials.CreateCredentialRecord(r.Context(), record); err != nil {
@@ -158,7 +200,7 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 		RequestID:      httpx.RequestIDFromContext(r.Context()),
 		IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 		Outcome:        "succeeded",
-		OccurredAt:     placeholderIssuedAt,
+		OccurredAt:     issuedAt,
 		ServiceName:    "issuer-api",
 	})
 
@@ -196,6 +238,11 @@ func (h *phase1IssuerHandler) getCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if record.IssuerID != attribution.OrganizationID {
+		httpx.WriteError(w, r.Context(), http.StatusNotFound, "credential_not_found", "credential record not found")
+		return
+	}
+
 	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
 		AuditID:        auditIDForAction(r, "read"),
 		Actor:          attribution,
@@ -205,7 +252,7 @@ func (h *phase1IssuerHandler) getCredential(w http.ResponseWriter, r *http.Reque
 		RequestID:      httpx.RequestIDFromContext(r.Context()),
 		IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 		Outcome:        "succeeded",
-		OccurredAt:     placeholderIssuedAt,
+		OccurredAt:     time.Now().UTC(),
 		ServiceName:    "issuer-api",
 	})
 
@@ -225,6 +272,82 @@ func (h *phase1IssuerHandler) getCredential(w http.ResponseWriter, r *http.Reque
 		CredentialArtifact:       credentialArtifactPayloadFromRecord(record.CredentialArtifact),
 		ArtifactReference:        record.ArtifactReference,
 	})
+}
+
+func (h *phase1IssuerHandler) updateCredentialStatus(w http.ResponseWriter, r *http.Request) {
+	attribution, ok := h.requireIssuerAttribution(w, r, issuerStatusWriteScope)
+	if !ok {
+		return
+	}
+
+	var request credentialStatusUpdateRequestPayload
+	if err := httpx.DecodeJSONBody(r, &request); err != nil {
+		httpx.WriteError(w, r.Context(), http.StatusBadRequest, "invalid_request", "request body must match the Phase 1 credential status contract")
+		return
+	}
+
+	if err := request.validate(); err != nil {
+		httpx.WriteError(w, r.Context(), http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	record, err := h.credentials.GetCredentialRecord(r.Context(), r.PathValue("credentialId"))
+	if err != nil {
+		if errors.Is(err, phase1.ErrRecordNotFound) {
+			httpx.WriteError(w, r.Context(), http.StatusNotFound, "credential_not_found", "credential record not found")
+			return
+		}
+
+		httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "credential record could not be loaded")
+		return
+	}
+
+	if record.IssuerID != attribution.OrganizationID {
+		httpx.WriteError(w, r.Context(), http.StatusNotFound, "credential_not_found", "credential record not found")
+		return
+	}
+
+	if record.Status != phase1.CredentialStatusActive {
+		httpx.WriteError(w, r.Context(), http.StatusConflict, "invalid_status_transition", "credential status transition is not allowed from the current status")
+		return
+	}
+
+	nextStatus := phase1.CredentialStatus(request.Status)
+	statusUpdatedAt := time.Now().UTC()
+	if err := h.credentials.UpdateCredentialStatus(
+		r.Context(),
+		record.CredentialID,
+		nextStatus,
+		statusUpdatedAt,
+		strings.TrimSpace(request.SupersededByCredentialID),
+	); err != nil {
+		if errors.Is(err, phase1.ErrRecordNotFound) {
+			httpx.WriteError(w, r.Context(), http.StatusNotFound, "credential_not_found", "credential record not found")
+			return
+		}
+
+		httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "credential status could not be updated")
+		return
+	}
+
+	record.Status = nextStatus
+	record.StatusUpdatedAt = statusUpdatedAt
+	record.SupersededByCredentialID = strings.TrimSpace(request.SupersededByCredentialID)
+
+	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
+		AuditID:        auditIDForAction(r, "status"),
+		Actor:          attribution,
+		Action:         issuerStatusWriteScope,
+		ResourceType:   "credential",
+		ResourceID:     record.CredentialID,
+		RequestID:      httpx.RequestIDFromContext(r.Context()),
+		IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key")),
+		Outcome:        "succeeded",
+		OccurredAt:     statusUpdatedAt,
+		ServiceName:    "issuer-api",
+	})
+
+	httpx.WriteJSON(w, http.StatusOK, credentialStatusPayloadFromRecord(record))
 }
 
 func (h *phase1IssuerHandler) requireIssuerAttribution(w http.ResponseWriter, r *http.Request, scope string) (authctx.Attribution, bool) {
@@ -259,10 +382,16 @@ func (p issuanceKYCClaimsPayload) validate() error {
 		return errors.New("claims.fullLegalName must not be empty")
 	case strings.TrimSpace(p.DateOfBirth) == "":
 		return errors.New("claims.dateOfBirth must not be empty")
+	case !isISODate(p.DateOfBirth):
+		return errors.New("claims.dateOfBirth must be an ISO date")
 	case strings.TrimSpace(p.CountryOfResidence) == "":
 		return errors.New("claims.countryOfResidence must not be empty")
+	case !isoCountryCodePattern.MatchString(p.CountryOfResidence):
+		return errors.New("claims.countryOfResidence must be a two-letter ISO country code")
 	case strings.TrimSpace(p.DocumentCountry) == "":
 		return errors.New("claims.documentCountry must not be empty")
+	case !isoCountryCodePattern.MatchString(p.DocumentCountry):
+		return errors.New("claims.documentCountry must be a two-letter ISO country code")
 	case strings.TrimSpace(p.KYCLevel) == "":
 		return errors.New("claims.kycLevel must not be empty")
 	case p.VerifiedAt.IsZero():
@@ -272,6 +401,28 @@ func (p issuanceKYCClaimsPayload) validate() error {
 	default:
 		return nil
 	}
+}
+
+func (p credentialStatusUpdateRequestPayload) validate() error {
+	status := strings.TrimSpace(p.Status)
+	supersededByCredentialID := strings.TrimSpace(p.SupersededByCredentialID)
+
+	switch status {
+	case string(phase1.CredentialStatusRevoked):
+		if supersededByCredentialID != "" {
+			return errors.New("supersededByCredentialId must be empty when status is revoked")
+		}
+	case string(phase1.CredentialStatusSuperseded):
+		if supersededByCredentialID == "" {
+			return errors.New("supersededByCredentialId must not be empty when status is superseded")
+		}
+	case string(phase1.CredentialStatusActive):
+		return errors.New("status must be a terminal Phase 1 status transition")
+	default:
+		return errors.New("status must be one of revoked or superseded")
+	}
+
+	return nil
 }
 
 func statusReferenceForCredential(credentialID string) string {
@@ -306,6 +457,17 @@ func credentialArtifactPayloadFromRecord(record *phase1.CredentialArtifact) *cre
 	}
 }
 
+func credentialStatusPayloadFromRecord(record phase1.CredentialRecord) credentialStatusPayload {
+	return credentialStatusPayload{
+		CredentialID:             record.CredentialID,
+		Status:                   string(record.Status),
+		StatusReference:          record.StatusReference,
+		StatusUpdatedAt:          record.StatusUpdatedAt,
+		ExpiresAt:                record.ExpiresAt,
+		SupersededByCredentialID: record.SupersededByCredentialID,
+	}
+}
+
 func contains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -314,4 +476,59 @@ func contains(values []string, target string) bool {
 	}
 
 	return false
+}
+
+type credentialArtifactEnvelope struct {
+	CredentialID string `json:"credentialId"`
+	IssuerID     string `json:"issuerId"`
+	TemplateID   string `json:"templateId"`
+	ExpiresAt    string `json:"expiresAt"`
+}
+
+func materializeCredentialArtifact(
+	credentialID string,
+	issuerID string,
+	templateID string,
+	expiresAt time.Time,
+) (phase1.CredentialArtifact, error) {
+	envelope := credentialArtifactEnvelope{
+		CredentialID: credentialID,
+		IssuerID:     issuerID,
+		TemplateID:   templateID,
+		ExpiresAt:    expiresAt.UTC().Format(time.RFC3339),
+	}
+
+	raw, err := json.Marshal(envelope)
+	if err != nil {
+		return phase1.CredentialArtifact{}, err
+	}
+
+	return phase1.CredentialArtifact{
+		Kind:      credentialArtifactKind,
+		MediaType: credentialArtifactMediaType,
+		Value:     credentialArtifactPrefix + base64.RawURLEncoding.EncodeToString(raw),
+	}, nil
+}
+
+func artifactDigest(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func defaultIssuerRecord() phase1.IssuerRecord {
+	now := time.Date(2026, time.April, 20, 9, 0, 0, 0, time.UTC)
+	return phase1.IssuerRecord{
+		IssuerID:                  defaultPhase1IssuerID,
+		DisplayName:               "HDIP Passport Issuer",
+		TrustState:                "active",
+		AllowedTemplateIDs:        []string{defaultTemplateID},
+		VerificationKeyReferences: []string{"key:issuer.hdip.dev:2026-04"},
+		CreatedAt:                 now,
+		UpdatedAt:                 now,
+	}
+}
+
+func isISODate(value string) bool {
+	_, err := time.Parse("2006-01-02", value)
+	return err == nil
 }

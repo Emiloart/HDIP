@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -15,19 +16,11 @@ import (
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/testutil"
 	"github.com/Emiloart/HDIP/services/issuer-api/internal/config"
+	phase1 "github.com/Emiloart/HDIP/services/issuer-api/internal/phase1"
 )
 
 func TestHealthHandler(t *testing.T) {
-	handler := NewMux(slog.Default(), config.Config{
-		ServiceName:       "issuer-api",
-		Host:              "127.0.0.1",
-		Port:              8081,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		BuildVersion:      "test",
-	})
+	handler := newTestIssuerHandler(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	recorder := httptest.NewRecorder()
@@ -49,16 +42,7 @@ func TestHealthHandler(t *testing.T) {
 }
 
 func TestIssuerProfileHandler(t *testing.T) {
-	handler := NewMux(slog.Default(), config.Config{
-		ServiceName:       "issuer-api",
-		Host:              "127.0.0.1",
-		Port:              8081,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		BuildVersion:      "test",
-	})
+	handler := newTestIssuerHandler(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/issuer/profile", nil)
 	recorder := httptest.NewRecorder()
@@ -73,16 +57,7 @@ func TestIssuerProfileHandler(t *testing.T) {
 }
 
 func TestIssuerTemplateHandler(t *testing.T) {
-	handler := NewMux(slog.Default(), config.Config{
-		ServiceName:       "issuer-api",
-		Host:              "127.0.0.1",
-		Port:              8081,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		BuildVersion:      "test",
-	})
+	handler := newTestIssuerHandler(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/issuer/templates/hdip-passport-basic", nil)
 	recorder := httptest.NewRecorder()
@@ -97,7 +72,8 @@ func TestIssuerTemplateHandler(t *testing.T) {
 }
 
 func TestPhase1IssueCredentialHandler(t *testing.T) {
-	handler := newTestIssuerHandler()
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/issuer/credentials",
@@ -116,7 +92,7 @@ func TestPhase1IssueCredentialHandler(t *testing.T) {
 }
 
 func TestPhase1IssueCredentialRejectsMissingAuth(t *testing.T) {
-	handler := newTestIssuerHandler()
+	handler := newTestIssuerHandler(t)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/issuer/credentials",
@@ -132,7 +108,7 @@ func TestPhase1IssueCredentialRejectsMissingAuth(t *testing.T) {
 }
 
 func TestPhase1IssueCredentialRejectsMissingScope(t *testing.T) {
-	handler := newTestIssuerHandler()
+	handler := newTestIssuerHandler(t)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/issuer/credentials",
@@ -149,7 +125,7 @@ func TestPhase1IssueCredentialRejectsMissingScope(t *testing.T) {
 }
 
 func TestPhase1IssueCredentialRejectsInvalidPayload(t *testing.T) {
-	handler := newTestIssuerHandler()
+	handler := newTestIssuerHandler(t)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/issuer/credentials",
@@ -166,7 +142,8 @@ func TestPhase1IssueCredentialRejectsInvalidPayload(t *testing.T) {
 }
 
 func TestPhase1GetCredentialHandler(t *testing.T) {
-	handler := newTestIssuerHandler()
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
 
 	createRequest := httptest.NewRequest(
 		http.MethodPost,
@@ -180,7 +157,12 @@ func TestPhase1GetCredentialHandler(t *testing.T) {
 		t.Fatalf("expected create status 201, got %d", createRecorder.Code)
 	}
 
-	readRequest := httptest.NewRequest(http.MethodGet, "/v1/issuer/credentials/"+placeholderCredentialID, nil)
+	var created issuanceResponsePayload
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	readRequest := httptest.NewRequest(http.MethodGet, "/v1/issuer/credentials/"+created.CredentialID, nil)
 	setIssuerPhase1Headers(readRequest, []string{issuerReadScope})
 	readRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(readRecorder, readRequest)
@@ -192,8 +174,272 @@ func TestPhase1GetCredentialHandler(t *testing.T) {
 	testutil.AssertJSONMatchesFixture(t, readRecorder.Body.Bytes(), "schemas/examples/credentials/credential-record.hdip-passport-basic.json")
 }
 
-func newTestIssuerHandler() http.Handler {
-	return NewMux(slog.Default(), config.Config{
+func TestPhase1GetCredentialReturnsNotFound(t *testing.T) {
+	handler := newTestIssuerHandler(t)
+	request := httptest.NewRequest(http.MethodGet, "/v1/issuer/credentials/cred_missing_001", nil)
+	setIssuerPhase1Headers(request, []string{issuerReadScope})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", recorder.Code)
+	}
+}
+
+func TestPhase1IssueCredentialPersistsDeterministicArtifactAndAudits(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials",
+		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/issuance-request.hdip-passport-basic.json")),
+	)
+	request.Header.Set("Idempotency-Key", "issue-1")
+	setIssuerPhase1Headers(request, []string{issuerIssueScope})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+
+	var response issuanceResponsePayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode issuance response: %v", err)
+	}
+
+	record, err := store.GetCredentialRecord(context.Background(), response.CredentialID)
+	if err != nil {
+		t.Fatalf("load credential record: %v", err)
+	}
+
+	expectedArtifact, err := materializeCredentialArtifact(
+		response.CredentialID,
+		defaultPhase1IssuerID,
+		defaultTemplateID,
+		time.Date(2027, time.April, 20, 9, 0, 0, 0, time.UTC),
+	)
+	if err != nil {
+		t.Fatalf("materialize expected artifact: %v", err)
+	}
+
+	if record.CredentialArtifact == nil {
+		t.Fatal("expected credential artifact to be stored")
+	}
+
+	if record.CredentialArtifact.Value != expectedArtifact.Value {
+		t.Fatalf("unexpected artifact value: %s", record.CredentialArtifact.Value)
+	}
+
+	if record.ArtifactDigest != artifactDigest(expectedArtifact.Value) {
+		t.Fatalf("unexpected artifact digest: %s", record.ArtifactDigest)
+	}
+
+	audits, err := store.AuditRecords()
+	if err != nil {
+		t.Fatalf("load audit records: %v", err)
+	}
+
+	if len(audits) != 1 {
+		t.Fatalf("expected 1 audit record, got %d", len(audits))
+	}
+
+	if audits[0].Action != issuerIssueScope || audits[0].Outcome != "succeeded" {
+		t.Fatalf("unexpected audit record: %+v", audits[0])
+	}
+
+	if audits[0].IdempotencyKey != "issue-1" {
+		t.Fatalf("expected idempotency key to be recorded, got %q", audits[0].IdempotencyKey)
+	}
+}
+
+func TestPhase1UpdateCredentialStatusHandler(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+
+	credentialID := issueCredentialForIssuerTest(t, handler)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials/"+credentialID+"/status",
+		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.revoked.json")),
+	)
+	request.Header.Set("Idempotency-Key", "status-1")
+	setIssuerPhase1Headers(request, []string{issuerStatusWriteScope})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+
+	var response credentialStatusPayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Status != "revoked" {
+		t.Fatalf("expected revoked status, got %+v", response)
+	}
+
+	readRequest := httptest.NewRequest(http.MethodGet, "/v1/issuer/credentials/"+credentialID, nil)
+	setIssuerPhase1Headers(readRequest, []string{issuerReadScope})
+	readRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(readRecorder, readRequest)
+	if readRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 after status update, got %d", readRecorder.Code)
+	}
+
+	var record credentialRecordPayload
+	if err := json.Unmarshal(readRecorder.Body.Bytes(), &record); err != nil {
+		t.Fatalf("decode credential record: %v", err)
+	}
+
+	if record.Status != "revoked" {
+		t.Fatalf("expected revoked credential record status, got %+v", record)
+	}
+
+	audits, err := store.AuditRecords()
+	if err != nil {
+		t.Fatalf("load audit records: %v", err)
+	}
+
+	if len(audits) != 3 {
+		t.Fatalf("expected 3 audit records, got %d", len(audits))
+	}
+
+	if audits[1].Action != issuerStatusWriteScope || audits[1].Outcome != "succeeded" {
+		t.Fatalf("unexpected status audit record: %+v", audits[1])
+	}
+
+	if audits[1].IdempotencyKey != "status-1" {
+		t.Fatalf("expected status idempotency key to be recorded, got %q", audits[1].IdempotencyKey)
+	}
+}
+
+func TestPhase1UpdateCredentialStatusRejectsInvalidTransition(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+
+	credentialID := issueCredentialForIssuerTest(t, handler)
+	updateCredentialStatusForIssuerTest(
+		t,
+		handler,
+		credentialID,
+		loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.revoked.json"),
+		http.StatusOK,
+	)
+
+	updateCredentialStatusForIssuerTest(
+		t,
+		handler,
+		credentialID,
+		loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.revoked.json"),
+		http.StatusConflict,
+	)
+}
+
+func TestPhase1UpdateCredentialStatusRejectsMissingAuth(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+
+	credentialID := issueCredentialForIssuerTest(t, handler)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials/"+credentialID+"/status",
+		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.revoked.json")),
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", recorder.Code)
+	}
+}
+
+func TestPhase1UpdateCredentialStatusRejectsMissingScope(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+
+	credentialID := issueCredentialForIssuerTest(t, handler)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials/"+credentialID+"/status",
+		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.revoked.json")),
+	)
+	setIssuerPhase1Headers(request, []string{issuerReadScope})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", recorder.Code)
+	}
+}
+
+func TestPhase1UpdateCredentialStatusRejectsInvalidPayload(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+
+	credentialID := issueCredentialForIssuerTest(t, handler)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials/"+credentialID+"/status",
+		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.superseded-without-reference.invalid.json")),
+	)
+	setIssuerPhase1Headers(request, []string{issuerStatusWriteScope})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
+func newTestIssuerHandler(t *testing.T) http.Handler {
+	t.Helper()
+
+	handler, err := NewMux(slog.Default(), testIssuerConfig(t))
+	if err != nil {
+		t.Fatalf("new issuer mux: %v", err)
+	}
+
+	return handler
+}
+
+func newTestIssuerHandlerWithStore(t *testing.T, store *phase1.RuntimeStore) http.Handler {
+	t.Helper()
+
+	return newMuxWithPhase1Handler(slog.Default(), testIssuerConfig(t), newPhase1IssuerHandlerWithStore(store))
+}
+
+func newIssuerStoreWithDefaults(t *testing.T) *phase1.RuntimeStore {
+	t.Helper()
+
+	store, err := phase1.OpenRuntimeStore(filepath.Join(t.TempDir(), "issuer-phase1-runtime.sqlite"))
+	if err != nil {
+		t.Fatalf("open runtime store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+
+	if err := store.SeedIssuerRecord(defaultIssuerRecord()); err != nil {
+		t.Fatalf("seed issuer record: %v", err)
+	}
+
+	return store
+}
+
+func testIssuerConfig(t *testing.T) config.Config {
+	t.Helper()
+
+	return config.Config{
 		ServiceName:       "issuer-api",
 		Host:              "127.0.0.1",
 		Port:              8081,
@@ -201,13 +447,14 @@ func newTestIssuerHandler() http.Handler {
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
+		Phase1RuntimePath: filepath.Join(t.TempDir(), "issuer-phase1-runtime.sqlite"),
 		BuildVersion:      "test",
-	})
+	}
 }
 
 func setIssuerPhase1Headers(request *http.Request, scopes []string) {
 	request.Header.Set("X-HDIP-Principal-ID", "issuer_operator_alex")
-	request.Header.Set("X-HDIP-Organization-ID", "did:web:issuer.hdip.dev")
+	request.Header.Set("X-HDIP-Organization-ID", defaultPhase1IssuerID)
 	request.Header.Set("X-HDIP-Auth-Reference", "session_issuer_001")
 	request.Header.Set("X-HDIP-Scopes", strings.Join(scopes, ","))
 }
@@ -227,4 +474,49 @@ func loadFixtureText(t *testing.T, relativePath string) string {
 	}
 
 	return string(raw)
+}
+
+func issueCredentialForIssuerTest(t *testing.T, handler http.Handler) string {
+	t.Helper()
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials",
+		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/issuance-request.hdip-passport-basic.json")),
+	)
+	setIssuerPhase1Headers(request, []string{issuerIssueScope})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+
+	var response issuanceResponsePayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode issuance response: %v", err)
+	}
+
+	return response.CredentialID
+}
+
+func updateCredentialStatusForIssuerTest(
+	t *testing.T,
+	handler http.Handler,
+	credentialID string,
+	body string,
+	expectedStatus int,
+) {
+	t.Helper()
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials/"+credentialID+"/status",
+		strings.NewReader(body),
+	)
+	setIssuerPhase1Headers(request, []string{issuerStatusWriteScope})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != expectedStatus {
+		t.Fatalf("expected %d, got %d", expectedStatus, recorder.Code)
+	}
 }

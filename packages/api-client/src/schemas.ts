@@ -81,6 +81,30 @@ export const issuanceResponseSchema = z.object({
   credentialArtifact: credentialArtifactSchema,
 }).strict();
 
+export const credentialStatusUpdateRequestSchema = z
+  .object({
+    status: z.enum(["revoked", "superseded"]),
+    supersededByCredentialId: z.string().min(1).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.status === "revoked" && value.supersededByCredentialId !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["supersededByCredentialId"],
+        message: "supersededByCredentialId must be absent when status is revoked",
+      });
+    }
+
+    if (value.status === "superseded" && value.supersededByCredentialId === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["supersededByCredentialId"],
+        message: "supersededByCredentialId is required when status is superseded",
+      });
+    }
+  });
+
 export const credentialStatusSchema = z.object({
   credentialId: z.string().min(1),
   status: credentialStatusValueSchema,
@@ -160,6 +184,7 @@ export type VerifierPolicyRequest = z.infer<typeof verifierPolicyRequestSchema>;
 export type VerifierResult = z.infer<typeof verifierResultSchema>;
 export type IssuanceRequest = z.infer<typeof issuanceRequestSchema>;
 export type IssuanceResponse = z.infer<typeof issuanceResponseSchema>;
+export type CredentialStatusUpdateRequest = z.infer<typeof credentialStatusUpdateRequestSchema>;
 export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
 export type CredentialRecord = z.infer<typeof credentialRecordSchema>;
 export type VerificationSubmissionRequest = z.infer<typeof verificationSubmissionRequestSchema>;

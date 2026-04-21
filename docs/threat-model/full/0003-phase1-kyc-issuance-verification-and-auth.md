@@ -7,7 +7,7 @@
 ## Change summary
 
 This threat model covers the Phase 1 transition from a read-only stub issuer/verifier flow to a real reusable KYC credential and verifier API.
-The Phase 1 boundary adds authenticated issuer writes, authenticated verifier writes, persistent credential and verification state, audit records, credential status handling, and minimum trust-registry participation.
+The Phase 1 boundary adds authenticated issuer writes, authenticated verifier writes, persistent credential and verification state, append-only audit records, issuer-authenticated credential status mutation, and minimum trust-registry participation.
 
 ## Assets
 
@@ -25,9 +25,9 @@ The Phase 1 boundary adds authenticated issuer writes, authenticated verifier wr
 
 - issuer operator to `issuer-api`
 - verifier integrator to `verifier-api`
-- `issuer-api` to credential persistence
-- `verifier-api` to verification persistence
-- `issuer-api` and `verifier-api` to `trust-registry`
+- `issuer-api` to the shared Phase 1 runtime persistence boundary
+- `verifier-api` to the shared Phase 1 runtime persistence boundary
+- the shared Phase 1 runtime persistence boundary to issuer trust records owned by `trust-registry`
 - service edge auth-context extraction boundary
 - audit append boundary
 - typed client to backend API boundary
@@ -47,7 +47,7 @@ The Phase 1 boundary adds authenticated issuer writes, authenticated verifier wr
 
 - `POST /v1/issuer/credentials`
 - issuer credential detail reads
-- issuer revoke and supersede actions
+- `POST /v1/issuer/credentials/{credentialId}/status` for issuer revoke and supersede actions
 - `POST /v1/verifier/verifications`
 - verifier result reads
 - trust-registry updates to issuer trust state or verification-key references
@@ -82,7 +82,8 @@ The Phase 1 boundary adds authenticated issuer writes, authenticated verifier wr
 - keep deterministic Phase 1 artifacts opaque and non-cryptographic until a later signing ADR lands
 - keep verification request persistence to digests and bounded metadata rather than duplicating full credentials by default
 - make audit records append-only and reference sensitive artifacts by identifiers or digests
-- consult `trust-registry` during verification for issuer trust state and verification-key references
+- consult the shared runtime trust read boundary during verification for issuer trust state and verification-key references rather than seeded verifier-local placeholders
+- make issuer-authenticated status transitions update shared runtime credential state before later issuer or verifier reads
 - return verifier decision `deny` for suspended or otherwise non-active issuers in deterministic Phase 1
 - keep status handling internal to issuer and verifier flows rather than exposing a broad anonymous status lookup in Phase 1
 - keep stub endpoints clearly separated from the real Phase 1 write path and do not reinterpret them as production verification flows
@@ -94,6 +95,7 @@ The Phase 1 boundary adds authenticated issuer writes, authenticated verifier wr
 - opaque Phase 1 artifacts do not provide cryptographic authenticity until a later signing model is approved
 - synchronous verifier evaluation can still be abused for denial-of-service without future rate or risk controls
 - trust-registry remains an HDIP-controlled dependency rather than a federated trust network in Phase 1
+- the initial shared runtime adapter may still rely on deterministic bootstrap data for issuer trust records until dedicated trust-registry writes land
 - if implementation cuts corners on idempotency or audit immutability, replay and repudiation risk will remain elevated
 
 ## Validation impact
@@ -106,6 +108,7 @@ The first real Phase 1 code slice must add:
 - tests for malformed or missing auth context
 - tests for replay or duplicate write handling
 - tests that status and trust-registry lookups affect verifier decisions deterministically, including `deny` for suspended or non-active issuers
+- tests that issuer status mutation updates the shared runtime state seen by later issuer and verifier reads
 - tests that logs and audit records do not contain raw sensitive credential payloads
 
 ## Related ADRs, plans, PRs, and issues

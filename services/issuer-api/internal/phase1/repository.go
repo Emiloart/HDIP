@@ -79,6 +79,7 @@ type IssuerRecordRepository interface {
 }
 
 type CredentialRecordRepository interface {
+	NextCredentialID(ctx context.Context, templateID string) (string, error)
 	CreateCredentialRecord(ctx context.Context, record CredentialRecord) error
 	GetCredentialRecord(ctx context.Context, credentialID string) (CredentialRecord, error)
 	UpdateCredentialStatus(

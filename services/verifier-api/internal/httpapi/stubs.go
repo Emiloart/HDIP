@@ -1,6 +1,7 @@
 package httpapi
 
 const defaultPolicyID = "kyc-passport-basic"
+const defaultTemplateID = "hdip-passport-basic"
 const defaultRequestID = "kyc-passport-basic-review"
 
 type verifierPolicyRequestResponse struct {

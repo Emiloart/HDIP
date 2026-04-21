@@ -9,6 +9,6 @@
   "credentialArtifact": {
     "kind": "phase1_opaque_artifact",
     "mediaType": "application/vnd.hdip.phase1-opaque-artifact",
-    "value": "opaque-artifact:cred_hdip_passport_basic_001:v1"
+    "value": "opaque-artifact:v1:eyJjcmVkZW50aWFsSWQiOiJjcmVkX2hkaXBfcGFzc3BvcnRfYmFzaWNfMDAxIiwiaXNzdWVySWQiOiJkaWQ6d2ViOmlzc3Vlci5oZGlwLmRldiIsInRlbXBsYXRlSWQiOiJoZGlwLXBhc3Nwb3J0LWJhc2ljIiwiZXhwaXJlc0F0IjoiMjAyNy0wNC0yMFQwOTowMDowMFoifQ"
   }
 }

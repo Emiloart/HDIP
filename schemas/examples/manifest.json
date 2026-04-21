@@ -103,6 +103,18 @@
       "valid": false
     },
     {
+      "contract": "credentialStatusUpdateRequest",
+      "schema": "issuer/credential-status-update-request.schema.json",
+      "fixture": "issuer/credential-status-update-request.revoked.json",
+      "valid": true
+    },
+    {
+      "contract": "credentialStatusUpdateRequest",
+      "schema": "issuer/credential-status-update-request.schema.json",
+      "fixture": "issuer/credential-status-update-request.superseded-without-reference.invalid.json",
+      "valid": false
+    },
+    {
       "contract": "credentialRecord",
       "schema": "credentials/credential-record.schema.json",
       "fixture": "credentials/credential-record.hdip-passport-basic.json",
