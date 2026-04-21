@@ -15,7 +15,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 
-	handler := httpapi.NewMux(logger, cfg)
+	handler, err := httpapi.NewMux(logger, cfg)
+	if err != nil {
+		return err
+	}
+
 	return runtime.RunHTTP(ctx, logger, runtime.HTTPConfig{
 		Address:           cfg.Address(),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,

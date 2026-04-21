@@ -3,6 +3,7 @@ go 1.26
 use (
 	./packages/go/foundation
 	./services/internal/phase1runtime
+	./services/internal/phase1sql
 	./services/issuer-api
 	./services/trust-registry
 	./services/verifier-api

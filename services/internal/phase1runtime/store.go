@@ -126,13 +126,30 @@ type IdempotencyRecord struct {
 	CallerActorType      string          `json:"callerActorType"`
 	IdempotencyKey       string          `json:"idempotencyKey"`
 	RequestFingerprint   string          `json:"requestFingerprint"`
+	State                string          `json:"state"`
 	ResponseStatusCode   int             `json:"responseStatusCode"`
 	ResourceType         string          `json:"resourceType"`
 	ResourceID           string          `json:"resourceId"`
 	Location             string          `json:"location,omitempty"`
 	ResponseBody         json.RawMessage `json:"responseBody"`
 	CreatedAt            time.Time       `json:"createdAt"`
+	UpdatedAt            time.Time       `json:"updatedAt"`
 }
+
+type IdempotencyReservationResult struct {
+	Outcome string
+	Record  IdempotencyRecord
+}
+
+const (
+	IdempotencyStateReserved  = "reserved"
+	IdempotencyStateCompleted = "completed"
+
+	IdempotencyReservationReserved   = "reserved"
+	IdempotencyReservationReplay     = "replay"
+	IdempotencyReservationConflict   = "conflict"
+	IdempotencyReservationInProgress = "in_progress"
+)
 
 func Open(path string) (*Store, error) {
 	canonicalPath, err := canonicalStorePath(path)
@@ -430,6 +447,59 @@ func (s *Store) CreateIdempotencyRecord(ctx context.Context, record IdempotencyR
 	})
 }
 
+func (s *Store) ReserveIdempotencyRecord(ctx context.Context, record IdempotencyRecord) (IdempotencyReservationResult, error) {
+	_ = ctx
+
+	var result IdempotencyReservationResult
+	err := s.withMutableState(func(state *persistedState) error {
+		key := idempotencyStorageKey(record.Operation, record.CallerOrganizationID, record.CallerPrincipalID, record.CallerActorType, record.IdempotencyKey)
+		storedRecord, ok := state.IdempotencyRecords[key]
+		if !ok {
+			reservedRecord := cloneIdempotencyRecord(record)
+			now := reservedRecord.CreatedAt.UTC()
+			if now.IsZero() {
+				now = time.Now().UTC()
+			}
+			reservedRecord.CreatedAt = now
+			reservedRecord.UpdatedAt = now
+			reservedRecord.State = IdempotencyStateReserved
+			state.IdempotencyRecords[key] = reservedRecord
+			result = IdempotencyReservationResult{
+				Outcome: IdempotencyReservationReserved,
+				Record:  cloneIdempotencyRecord(reservedRecord),
+			}
+			return nil
+		}
+
+		if strings.TrimSpace(storedRecord.RequestFingerprint) != strings.TrimSpace(record.RequestFingerprint) {
+			result = IdempotencyReservationResult{
+				Outcome: IdempotencyReservationConflict,
+				Record:  cloneIdempotencyRecord(storedRecord),
+			}
+			return nil
+		}
+
+		if strings.TrimSpace(storedRecord.State) == IdempotencyStateCompleted {
+			result = IdempotencyReservationResult{
+				Outcome: IdempotencyReservationReplay,
+				Record:  cloneIdempotencyRecord(storedRecord),
+			}
+			return nil
+		}
+
+		result = IdempotencyReservationResult{
+			Outcome: IdempotencyReservationInProgress,
+			Record:  cloneIdempotencyRecord(storedRecord),
+		}
+		return nil
+	})
+	if err != nil {
+		return IdempotencyReservationResult{}, err
+	}
+
+	return result, nil
+}
+
 func (s *Store) GetIdempotencyRecord(
 	ctx context.Context,
 	operation string,
@@ -474,6 +544,57 @@ func (s *Store) ListIdempotencyRecords(ctx context.Context) ([]IdempotencyRecord
 	}
 
 	return records, nil
+}
+
+func (s *Store) CompleteIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error {
+	_ = ctx
+
+	return s.withMutableState(func(state *persistedState) error {
+		key := idempotencyStorageKey(record.Operation, record.CallerOrganizationID, record.CallerPrincipalID, record.CallerActorType, record.IdempotencyKey)
+		storedRecord, ok := state.IdempotencyRecords[key]
+		if !ok {
+			return ErrRecordNotFound
+		}
+
+		storedRecord.State = IdempotencyStateCompleted
+		storedRecord.ResponseStatusCode = record.ResponseStatusCode
+		storedRecord.ResourceType = record.ResourceType
+		storedRecord.ResourceID = record.ResourceID
+		storedRecord.Location = record.Location
+		storedRecord.ResponseBody = append(json.RawMessage(nil), record.ResponseBody...)
+		storedRecord.UpdatedAt = record.UpdatedAt.UTC()
+		if storedRecord.UpdatedAt.IsZero() {
+			storedRecord.UpdatedAt = time.Now().UTC()
+		}
+		state.IdempotencyRecords[key] = cloneIdempotencyRecord(storedRecord)
+		return nil
+	})
+}
+
+func (s *Store) ReleaseIdempotencyRecord(
+	ctx context.Context,
+	operation string,
+	callerOrganizationID string,
+	callerPrincipalID string,
+	callerActorType string,
+	idempotencyKey string,
+) error {
+	_ = ctx
+
+	return s.withMutableState(func(state *persistedState) error {
+		key := idempotencyStorageKey(operation, callerOrganizationID, callerPrincipalID, callerActorType, idempotencyKey)
+		storedRecord, ok := state.IdempotencyRecords[key]
+		if !ok {
+			return nil
+		}
+
+		if strings.TrimSpace(storedRecord.State) == IdempotencyStateCompleted {
+			return nil
+		}
+
+		delete(state.IdempotencyRecords, key)
+		return nil
+	})
 }
 
 func (s *Store) withReadState(fn func(state persistedState) error) error {
@@ -728,12 +849,14 @@ func cloneIdempotencyRecord(record IdempotencyRecord) IdempotencyRecord {
 		CallerActorType:      record.CallerActorType,
 		IdempotencyKey:       record.IdempotencyKey,
 		RequestFingerprint:   record.RequestFingerprint,
+		State:                record.State,
 		ResponseStatusCode:   record.ResponseStatusCode,
 		ResourceType:         record.ResourceType,
 		ResourceID:           record.ResourceID,
 		Location:             record.Location,
 		ResponseBody:         append(json.RawMessage(nil), record.ResponseBody...),
 		CreatedAt:            record.CreatedAt.UTC(),
+		UpdatedAt:            record.UpdatedAt.UTC(),
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/testutil"
+	phase1sql "github.com/Emiloart/HDIP/services/internal/phase1sql"
 	"github.com/Emiloart/HDIP/services/issuer-api/internal/config"
 	phase1 "github.com/Emiloart/HDIP/services/issuer-api/internal/phase1"
 )
@@ -342,6 +343,49 @@ func TestPhase1IssueCredentialReplayConflictFailsCleanly(t *testing.T) {
 	}
 }
 
+func TestPhase1IssueCredentialInProgressReservationFailsCleanly(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+	body := loadFixtureText(t, "schemas/examples/issuer/issuance-request.hdip-passport-basic.json")
+	var requestPayload issuanceRequestPayload
+	if err := json.Unmarshal([]byte(body), &requestPayload); err != nil {
+		t.Fatalf("decode request fixture: %v", err)
+	}
+
+	if _, err := store.ReserveIdempotencyRecord(context.Background(), phase1.IdempotencyRecord{
+		Operation:            issuerIssueScope,
+		CallerPrincipalID:    "issuer_operator_alex",
+		CallerOrganizationID: defaultPhase1IssuerID,
+		CallerActorType:      "issuer_operator",
+		IdempotencyKey:       "issue-in-progress-1",
+		RequestFingerprint:   issuanceRequestFingerprint(requestPayload),
+		ResourceType:         "credential",
+		CreatedAt:            time.Now().UTC(),
+		UpdatedAt:            time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("reserve idempotency record: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/issuer/credentials", strings.NewReader(body))
+	request.Header.Set("Idempotency-Key", "issue-in-progress-1")
+	setIssuerPhase1Headers(request, []string{issuerIssueScope})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", recorder.Code)
+	}
+
+	var response httpx.ErrorEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Error.Code != "idempotency_in_progress" {
+		t.Fatalf("unexpected error response: %+v", response)
+	}
+}
+
 func TestPhase1UpdateCredentialStatusHandler(t *testing.T) {
 	store := newIssuerStoreWithDefaults(t)
 	handler := newTestIssuerHandlerWithStore(t, store)
@@ -497,6 +541,50 @@ func TestPhase1UpdateCredentialStatusReplayConflictFailsCleanly(t *testing.T) {
 	}
 }
 
+func TestPhase1UpdateCredentialStatusInProgressReservationFailsCleanly(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	handler := newTestIssuerHandlerWithStore(t, store)
+	credentialID := issueCredentialForIssuerTest(t, handler)
+	body := loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.revoked.json")
+	var requestPayload credentialStatusUpdateRequestPayload
+	if err := json.Unmarshal([]byte(body), &requestPayload); err != nil {
+		t.Fatalf("decode request fixture: %v", err)
+	}
+
+	if _, err := store.ReserveIdempotencyRecord(context.Background(), phase1.IdempotencyRecord{
+		Operation:            issuerStatusWriteScope,
+		CallerPrincipalID:    "issuer_operator_alex",
+		CallerOrganizationID: defaultPhase1IssuerID,
+		CallerActorType:      "issuer_operator",
+		IdempotencyKey:       "status-in-progress-1",
+		RequestFingerprint:   credentialStatusUpdateFingerprint(credentialID, requestPayload),
+		ResourceType:         "credential",
+		CreatedAt:            time.Now().UTC(),
+		UpdatedAt:            time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("reserve idempotency record: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/issuer/credentials/"+credentialID+"/status", strings.NewReader(body))
+	request.Header.Set("Idempotency-Key", "status-in-progress-1")
+	setIssuerPhase1Headers(request, []string{issuerStatusWriteScope})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", recorder.Code)
+	}
+
+	var response httpx.ErrorEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Error.Code != "idempotency_in_progress" {
+		t.Fatalf("unexpected error response: %+v", response)
+	}
+}
+
 func TestPhase1UpdateCredentialStatusRejectsMissingAuth(t *testing.T) {
 	store := newIssuerStoreWithDefaults(t)
 	handler := newTestIssuerHandlerWithStore(t, store)
@@ -553,6 +641,55 @@ func TestPhase1UpdateCredentialStatusRejectsInvalidPayload(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
+func TestPhase1PrimarySQLStoreRoundTrip(t *testing.T) {
+	dsn := os.Getenv("HDIP_PHASE1_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("HDIP_PHASE1_TEST_DATABASE_URL is not set")
+	}
+
+	sqlStore, err := phase1sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open sql store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sqlStore.Close()
+	})
+
+	store, err := phase1.OpenStore(phase1.StoreOptions{
+		DatabaseDriver: "pgx",
+		DatabaseURL:    dsn,
+	})
+	if err != nil {
+		t.Fatalf("open runtime store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+
+	if err := store.SeedIssuerRecord(defaultIssuerRecord()); err != nil {
+		t.Fatalf("seed issuer record: %v", err)
+	}
+
+	handler := newTestIssuerHandlerWithStore(t, store)
+	credentialID := issueCredentialForIssuerTest(t, handler)
+	updateCredentialStatusForIssuerTest(
+		t,
+		handler,
+		credentialID,
+		loadFixtureText(t, "schemas/examples/issuer/credential-status-update-request.revoked.json"),
+		http.StatusOK,
+	)
+
+	record, err := sqlStore.GetCredentialRecord(context.Background(), credentialID)
+	if err != nil {
+		t.Fatalf("load credential from sql store: %v", err)
+	}
+
+	if record.Status != "revoked" || record.IssuerID != defaultPhase1IssuerID {
+		t.Fatalf("unexpected sql-backed credential record: %+v", record)
 	}
 }
 

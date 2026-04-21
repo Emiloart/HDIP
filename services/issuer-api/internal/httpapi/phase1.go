@@ -14,6 +14,7 @@ import (
 
 	"github.com/Emiloart/HDIP/packages/go/foundation/authctx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
+	"github.com/Emiloart/HDIP/services/issuer-api/internal/config"
 	phase1 "github.com/Emiloart/HDIP/services/issuer-api/internal/phase1"
 )
 
@@ -31,9 +32,9 @@ var isoCountryCodePattern = regexp.MustCompile(`^[A-Z]{2}$`)
 
 type phase1IssuerHandler struct {
 	issuerExtractor authctx.IssuerOperatorExtractor
+	store           *phase1.RuntimeStore
 	issuers         phase1.IssuerRecordRepository
 	credentials     phase1.CredentialRecordRepository
-	idempotency     phase1.IdempotencyRecordRepository
 	audits          phase1.AuditRecordRepository
 }
 
@@ -101,13 +102,13 @@ type credentialStatusPayload struct {
 	SupersededByCredentialID string    `json:"supersededByCredentialId,omitempty"`
 }
 
-func newPhase1IssuerHandler(runtimePath string) (*phase1IssuerHandler, error) {
-	store, err := phase1.OpenRuntimeStore(runtimePath)
+func newPhase1IssuerHandler(cfg config.Config) (*phase1IssuerHandler, error) {
+	store, err := phase1.OpenStore(phase1.StoreOptions{
+		DatabaseDriver:  cfg.Phase1DatabaseDriver,
+		DatabaseURL:     cfg.Phase1DatabaseURL,
+		LegacyStatePath: cfg.Phase1StatePath,
+	})
 	if err != nil {
-		return nil, err
-	}
-
-	if err := store.SeedIssuerRecord(defaultIssuerRecord()); err != nil {
 		return nil, err
 	}
 
@@ -117,9 +118,9 @@ func newPhase1IssuerHandler(runtimePath string) (*phase1IssuerHandler, error) {
 func newPhase1IssuerHandlerWithStore(store *phase1.RuntimeStore) *phase1IssuerHandler {
 	return &phase1IssuerHandler{
 		issuerExtractor: authctx.HeaderIssuerOperatorExtractor{},
+		store:           store,
 		issuers:         store,
 		credentials:     store,
-		idempotency:     store,
 		audits:          store,
 	}
 }
@@ -154,11 +155,24 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	requestFingerprint := issuanceRequestFingerprint(request)
+	reservationOpen := false
 	if idempotencyKey != "" {
-		handled, ok := h.handleIssuanceIdempotency(w, r, attribution, idempotencyKey, requestFingerprint)
-		if handled || !ok {
+		if !h.reserveIssuanceIdempotency(w, r, attribution, idempotencyKey, requestFingerprint) {
 			return
 		}
+		reservationOpen = true
+		defer func() {
+			if reservationOpen {
+				_ = h.store.ReleaseIdempotencyRecord(
+					r.Context(),
+					issuerIssueScope,
+					attribution.OrganizationID,
+					attribution.PrincipalID,
+					string(attribution.ActorType),
+					idempotencyKey,
+				)
+			}
+		}()
 	}
 
 	credentialID, err := h.credentials.NextCredentialID(r.Context(), request.TemplateID)
@@ -219,7 +233,7 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 	}
 	location := "/v1/issuer/credentials/" + record.CredentialID
 	if idempotencyKey != "" {
-		if err := h.storeIdempotencyResponse(
+		if err := h.completeIdempotencyResponse(
 			r.Context(),
 			attribution,
 			issuerIssueScope,
@@ -235,6 +249,7 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 			httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "issuance replay state could not be stored")
 			return
 		}
+		reservationOpen = false
 	}
 
 	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
@@ -326,11 +341,24 @@ func (h *phase1IssuerHandler) updateCredentialStatus(w http.ResponseWriter, r *h
 
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	requestFingerprint := credentialStatusUpdateFingerprint(r.PathValue("credentialId"), request)
+	reservationOpen := false
 	if idempotencyKey != "" {
-		handled, ok := h.handleCredentialStatusIdempotency(w, r, attribution, idempotencyKey, requestFingerprint)
-		if handled || !ok {
+		if !h.reserveCredentialStatusIdempotency(w, r, attribution, idempotencyKey, requestFingerprint) {
 			return
 		}
+		reservationOpen = true
+		defer func() {
+			if reservationOpen {
+				_ = h.store.ReleaseIdempotencyRecord(
+					r.Context(),
+					issuerStatusWriteScope,
+					attribution.OrganizationID,
+					attribution.PrincipalID,
+					string(attribution.ActorType),
+					idempotencyKey,
+				)
+			}
+		}()
 	}
 
 	record, err := h.credentials.GetCredentialRecord(r.Context(), r.PathValue("credentialId"))
@@ -378,7 +406,7 @@ func (h *phase1IssuerHandler) updateCredentialStatus(w http.ResponseWriter, r *h
 
 	response := credentialStatusPayloadFromRecord(record)
 	if idempotencyKey != "" {
-		if err := h.storeIdempotencyResponse(
+		if err := h.completeIdempotencyResponse(
 			r.Context(),
 			attribution,
 			issuerStatusWriteScope,
@@ -394,6 +422,7 @@ func (h *phase1IssuerHandler) updateCredentialStatus(w http.ResponseWriter, r *h
 			httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "credential status replay state could not be stored")
 			return
 		}
+		reservationOpen = false
 	}
 
 	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
@@ -495,14 +524,14 @@ func auditIDForAction(r *http.Request, action string) string {
 	return httpx.RequestIDFromContext(r.Context()) + ":" + action
 }
 
-func (h *phase1IssuerHandler) handleIssuanceIdempotency(
+func (h *phase1IssuerHandler) reserveIssuanceIdempotency(
 	w http.ResponseWriter,
 	r *http.Request,
 	attribution authctx.Attribution,
 	idempotencyKey string,
 	requestFingerprint string,
-) (handled bool, ok bool) {
-	return h.handleIdempotencyReplay(
+) bool {
+	return h.reserveIdempotencyRequest(
 		w,
 		r,
 		attribution,
@@ -513,14 +542,14 @@ func (h *phase1IssuerHandler) handleIssuanceIdempotency(
 	)
 }
 
-func (h *phase1IssuerHandler) handleCredentialStatusIdempotency(
+func (h *phase1IssuerHandler) reserveCredentialStatusIdempotency(
 	w http.ResponseWriter,
 	r *http.Request,
 	attribution authctx.Attribution,
 	idempotencyKey string,
 	requestFingerprint string,
-) (handled bool, ok bool) {
-	return h.handleIdempotencyReplay(
+) bool {
+	return h.reserveIdempotencyRequest(
 		w,
 		r,
 		attribution,
@@ -531,7 +560,7 @@ func (h *phase1IssuerHandler) handleCredentialStatusIdempotency(
 	)
 }
 
-func (h *phase1IssuerHandler) handleIdempotencyReplay(
+func (h *phase1IssuerHandler) reserveIdempotencyRequest(
 	w http.ResponseWriter,
 	r *http.Request,
 	attribution authctx.Attribution,
@@ -539,25 +568,66 @@ func (h *phase1IssuerHandler) handleIdempotencyReplay(
 	idempotencyKey string,
 	requestFingerprint string,
 	resourceType string,
-) (handled bool, ok bool) {
-	record, err := h.idempotency.GetIdempotencyRecord(
+) bool {
+	result, err := h.store.ReserveIdempotencyRecord(
 		r.Context(),
-		operation,
-		attribution.OrganizationID,
-		attribution.PrincipalID,
-		string(attribution.ActorType),
-		idempotencyKey,
+		phase1.IdempotencyRecord{
+			Operation:            operation,
+			CallerPrincipalID:    attribution.PrincipalID,
+			CallerOrganizationID: attribution.OrganizationID,
+			CallerActorType:      string(attribution.ActorType),
+			IdempotencyKey:       idempotencyKey,
+			RequestFingerprint:   requestFingerprint,
+			ResourceType:         resourceType,
+			CreatedAt:            time.Now().UTC(),
+			UpdatedAt:            time.Now().UTC(),
+		},
 	)
 	if err != nil {
-		if errors.Is(err, phase1.ErrRecordNotFound) {
-			return false, true
-		}
-
 		httpx.WriteError(w, r.Context(), http.StatusInternalServerError, "persistence_error", "idempotency state could not be loaded")
-		return false, false
+		return false
 	}
 
-	if record.RequestFingerprint != requestFingerprint {
+	switch result.Outcome {
+	case phase1.IdempotencyReservationReserved:
+		return true
+	case phase1.IdempotencyReservationReplay:
+		record := result.Record
+		_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
+			AuditID:        auditIDForAction(r, "idempotency-replay"),
+			Actor:          attribution,
+			Action:         operation,
+			ResourceType:   resourceType,
+			ResourceID:     record.ResourceID,
+			RequestID:      httpx.RequestIDFromContext(r.Context()),
+			IdempotencyKey: idempotencyKey,
+			Outcome:        "replayed",
+			OccurredAt:     time.Now().UTC(),
+			ServiceName:    "issuer-api",
+		})
+		if record.Location != "" {
+			w.Header().Set("Location", record.Location)
+		}
+		writeStoredJSON(w, record.ResponseStatusCode, record.ResponseBody)
+		return false
+	case phase1.IdempotencyReservationInProgress:
+		record := result.Record
+		_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
+			AuditID:        auditIDForAction(r, "idempotency-in-progress"),
+			Actor:          attribution,
+			Action:         operation,
+			ResourceType:   resourceType,
+			ResourceID:     record.ResourceID,
+			RequestID:      httpx.RequestIDFromContext(r.Context()),
+			IdempotencyKey: idempotencyKey,
+			Outcome:        "failed",
+			OccurredAt:     time.Now().UTC(),
+			ServiceName:    "issuer-api",
+		})
+		httpx.WriteError(w, r.Context(), http.StatusConflict, "idempotency_in_progress", "Idempotency-Key is already reserved by an in-flight Phase 1 request")
+		return false
+	default:
+		record := result.Record
 		_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
 			AuditID:        auditIDForAction(r, "idempotency-conflict"),
 			Actor:          attribution,
@@ -571,29 +641,11 @@ func (h *phase1IssuerHandler) handleIdempotencyReplay(
 			ServiceName:    "issuer-api",
 		})
 		httpx.WriteError(w, r.Context(), http.StatusConflict, "idempotency_conflict", "Idempotency-Key is already bound to a different Phase 1 request")
-		return true, false
+		return false
 	}
-
-	_ = h.audits.AppendAuditRecord(r.Context(), phase1.AuditRecord{
-		AuditID:        auditIDForAction(r, "idempotency-replay"),
-		Actor:          attribution,
-		Action:         operation,
-		ResourceType:   resourceType,
-		ResourceID:     record.ResourceID,
-		RequestID:      httpx.RequestIDFromContext(r.Context()),
-		IdempotencyKey: idempotencyKey,
-		Outcome:        "replayed",
-		OccurredAt:     time.Now().UTC(),
-		ServiceName:    "issuer-api",
-	})
-	if record.Location != "" {
-		w.Header().Set("Location", record.Location)
-	}
-	writeStoredJSON(w, record.ResponseStatusCode, record.ResponseBody)
-	return true, false
 }
 
-func (h *phase1IssuerHandler) storeIdempotencyResponse(
+func (h *phase1IssuerHandler) completeIdempotencyResponse(
 	ctx context.Context,
 	attribution authctx.Attribution,
 	operation string,
@@ -611,19 +663,21 @@ func (h *phase1IssuerHandler) storeIdempotencyResponse(
 		return err
 	}
 
-	return h.idempotency.CreateIdempotencyRecord(ctx, phase1.IdempotencyRecord{
+	return h.store.CompleteIdempotencyRecord(ctx, phase1.IdempotencyRecord{
 		Operation:            operation,
 		CallerPrincipalID:    attribution.PrincipalID,
 		CallerOrganizationID: attribution.OrganizationID,
 		CallerActorType:      string(attribution.ActorType),
 		IdempotencyKey:       idempotencyKey,
 		RequestFingerprint:   requestFingerprint,
+		State:                phase1.IdempotencyStateCompleted,
 		ResponseStatusCode:   statusCode,
 		ResourceType:         resourceType,
 		ResourceID:           resourceID,
 		Location:             location,
 		ResponseBody:         rawResponse,
 		CreatedAt:            createdAt,
+		UpdatedAt:            createdAt,
 	})
 }
 

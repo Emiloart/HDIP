@@ -1,22 +1,8 @@
-package phase1
+package phase1sql
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"time"
-
-	"github.com/Emiloart/HDIP/packages/go/foundation/authctx"
-)
-
-type CredentialStatus string
-
-var ErrRecordNotFound = errors.New("phase1 record not found")
-
-const (
-	CredentialStatusActive     CredentialStatus = "active"
-	CredentialStatusRevoked    CredentialStatus = "revoked"
-	CredentialStatusSuperseded CredentialStatus = "superseded"
 )
 
 type KYCClaims struct {
@@ -54,7 +40,7 @@ type CredentialRecord struct {
 	ArtifactDigest           string
 	CredentialArtifact       *CredentialArtifact
 	ArtifactReference        string
-	Status                   CredentialStatus
+	Status                   string
 	StatusReference          string
 	IssuedAt                 time.Time
 	ExpiresAt                time.Time
@@ -62,9 +48,39 @@ type CredentialRecord struct {
 	SupersededByCredentialID string
 }
 
+type Actor struct {
+	PrincipalID             string
+	OrganizationID          string
+	ActorType               string
+	Scopes                  []string
+	AuthenticationReference string
+}
+
+type VerificationRequestRecord struct {
+	VerificationID            string
+	VerifierID                string
+	SubmittedCredentialDigest string
+	CredentialID              string
+	PolicyID                  string
+	RequestedAt               time.Time
+	Actor                     Actor
+	IdempotencyKey            string
+}
+
+type VerificationResultRecord struct {
+	VerificationID   string
+	IssuerID         string
+	Decision         string
+	ReasonCodes      []string
+	IssuerTrustState string
+	CredentialStatus string
+	EvaluatedAt      time.Time
+	ResponseVersion  string
+}
+
 type AuditRecord struct {
 	AuditID        string
-	Actor          authctx.Attribution
+	Actor          Actor
 	Action         string
 	ResourceType   string
 	ResourceID     string
@@ -106,36 +122,3 @@ const (
 	IdempotencyReservationConflict   = "conflict"
 	IdempotencyReservationInProgress = "in_progress"
 )
-
-type IssuerRecordRepository interface {
-	GetIssuerRecord(ctx context.Context, issuerID string) (IssuerRecord, error)
-}
-
-type CredentialRecordRepository interface {
-	NextCredentialID(ctx context.Context, templateID string) (string, error)
-	CreateCredentialRecord(ctx context.Context, record CredentialRecord) error
-	GetCredentialRecord(ctx context.Context, credentialID string) (CredentialRecord, error)
-	UpdateCredentialStatus(
-		ctx context.Context,
-		credentialID string,
-		status CredentialStatus,
-		statusUpdatedAt time.Time,
-		supersededByCredentialID string,
-	) error
-}
-
-type AuditRecordRepository interface {
-	AppendAuditRecord(ctx context.Context, record AuditRecord) error
-}
-
-type IdempotencyRecordRepository interface {
-	CreateIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error
-	GetIdempotencyRecord(
-		ctx context.Context,
-		operation string,
-		callerOrganizationID string,
-		callerPrincipalID string,
-		callerActorType string,
-		idempotencyKey string,
-	) (IdempotencyRecord, error)
-}

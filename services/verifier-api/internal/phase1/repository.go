@@ -116,13 +116,30 @@ type IdempotencyRecord struct {
 	CallerActorType      string
 	IdempotencyKey       string
 	RequestFingerprint   string
+	State                string
 	ResponseStatusCode   int
 	ResourceType         string
 	ResourceID           string
 	Location             string
 	ResponseBody         json.RawMessage
 	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
+
+type IdempotencyReservationResult struct {
+	Outcome string
+	Record  IdempotencyRecord
+}
+
+const (
+	IdempotencyStateReserved  = "reserved"
+	IdempotencyStateCompleted = "completed"
+
+	IdempotencyReservationReserved   = "reserved"
+	IdempotencyReservationReplay     = "replay"
+	IdempotencyReservationConflict   = "conflict"
+	IdempotencyReservationInProgress = "in_progress"
+)
 
 type IdempotencyRecordRepository interface {
 	CreateIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error

@@ -7,7 +7,7 @@
 ## Change summary
 
 This threat model covers the Phase 1 transition from a read-only stub issuer/verifier flow to a real reusable KYC credential and verifier API.
-The Phase 1 boundary adds authenticated issuer writes, authenticated verifier writes, persistent credential and verification state, append-only audit records, issuer-authenticated credential status mutation, persisted idempotency and replay handling for write paths, and minimum trust-registry participation through an explicit verifier trust-read adapter.
+The Phase 1 boundary now adds authenticated issuer writes, authenticated verifier writes, Cockroach-compatible relational persistence for credential and verification state, append-only audit records, issuer-authenticated credential status mutation, reservation-state idempotency for write paths, and trust-registry-owned runtime reads through an explicit verifier trust-read adapter.
 
 ## Assets
 
@@ -25,9 +25,10 @@ The Phase 1 boundary adds authenticated issuer writes, authenticated verifier wr
 
 - issuer operator to `issuer-api`
 - verifier integrator to `verifier-api`
-- `issuer-api` to the shared Phase 1 runtime persistence boundary
-- `verifier-api` to the shared Phase 1 runtime persistence boundary
-- the shared Phase 1 runtime persistence boundary to issuer trust records owned by `trust-registry`
+- `issuer-api` to the relational Phase 1 persistence boundary
+- `verifier-api` to the relational Phase 1 persistence boundary
+- `trust-registry` to the relational issuer-trust persistence boundary it owns for runtime reads
+- verifier trust-read client to the `trust-registry` internal runtime-read boundary
 - service edge auth-context extraction boundary
 - audit append boundary
 - typed client to backend API boundary
@@ -85,8 +86,9 @@ The Phase 1 boundary adds authenticated issuer writes, authenticated verifier wr
 - keep deterministic Phase 1 artifacts opaque and non-cryptographic until a later signing ADR lands
 - keep verification request persistence to digests and bounded metadata rather than duplicating full credentials by default
 - make audit records append-only and reference sensitive artifacts by identifiers or digests
-- consult the shared runtime through an explicit verifier trust-read adapter for issuer trust state and verification-key references rather than a generic issuer-record path or seeded verifier-local placeholders
-- make issuer-authenticated status transitions update shared runtime credential state before later issuer or verifier reads
+- consult the trust-registry-owned runtime read boundary through an explicit verifier trust-read adapter for issuer trust state and verification-key references rather than a generic issuer-record path or seeded verifier-local placeholders
+- reserve caller-bound idempotency keys before write-side effects so overlapping same-key writes fail closed rather than silently duplicating state
+- make issuer-authenticated status transitions update persisted credential state before later issuer or verifier reads
 - return verifier decision `deny` for suspended or otherwise non-active issuers in deterministic Phase 1
 - keep status handling internal to issuer and verifier flows rather than exposing a broad anonymous status lookup in Phase 1
 - keep stub endpoints clearly separated from the real Phase 1 write path and do not reinterpret them as production verification flows
@@ -98,8 +100,8 @@ The Phase 1 boundary adds authenticated issuer writes, authenticated verifier wr
 - opaque Phase 1 artifacts do not provide cryptographic authenticity until a later signing model is approved
 - synchronous verifier evaluation can still be abused for denial-of-service without future rate or risk controls
 - trust-registry remains an HDIP-controlled dependency rather than a federated trust network in Phase 1
-- the initial shared runtime adapter may still rely on deterministic bootstrap data for issuer trust records until dedicated trust-registry writes land
-- persisted replay handling still depends on the replaceable shared runtime adapter rather than the final production storage backend
+- trust-registry runtime reads are still internal HDIP service calls without the final production auth layer
+- transitional JSON state fallback still exists for compatibility and tests, so local misuse of fallback configuration could bypass the primary relational path
 - if implementation cuts corners on idempotency conflict handling or audit immutability, replay and repudiation risk will remain elevated
 
 ## Validation impact
@@ -112,9 +114,11 @@ The first real Phase 1 code slice must add:
 - tests for malformed or missing auth context
 - tests for replay or duplicate write handling
 - tests that replayed writes return prior stored results and that conflicting idempotency-key reuse fails cleanly
+- tests that overlapping same-key writes fail with explicit reservation or in-flight outcomes
 - tests that status and trust-registry lookups affect verifier decisions deterministically, including `deny` for suspended or non-active issuers
-- tests that issuer status mutation updates the shared runtime state seen by later issuer and verifier reads
-- tests that separate runtime instances observe the same persisted credential, status, trust, and idempotency state
+- tests that issuer status mutation updates the persisted state seen by later issuer and verifier reads
+- tests that separate repository or runtime instances observe the same persisted credential, status, trust, and idempotency state
+- tests that trust-registry-owned runtime reads determine verifier trust outcomes through the explicit trust adapter
 - tests that logs and audit records do not contain raw sensitive credential payloads
 
 ## Related ADRs, plans, PRs, and issues
@@ -124,4 +128,4 @@ The first real Phase 1 code slice must add:
 - `docs/adr/0007-phase1-state-and-persistence-model.md`
 - `docs/adr/0008-phase1-auth-and-attribution-boundary.md`
 - `docs/adr/0009-phase1-opaque-artifact-and-suspended-issuer-policy.md`
-- `docs/plans/active/0010-phase1-persistence-hardening-idempotency-and-trust-read-adapter.md`
+- `docs/plans/active/0011-phase1-production-persistence-and-trust-runtime-reads.md`

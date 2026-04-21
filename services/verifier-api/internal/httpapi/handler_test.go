@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Emiloart/HDIP/packages/go/foundation/authctx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/testutil"
+	phase1sql "github.com/Emiloart/HDIP/services/internal/phase1sql"
 	"github.com/Emiloart/HDIP/services/verifier-api/internal/config"
 	phase1 "github.com/Emiloart/HDIP/services/verifier-api/internal/phase1"
 )
@@ -384,6 +384,49 @@ func TestPhase1CreateVerificationReplayConflictFailsCleanly(t *testing.T) {
 	}
 }
 
+func TestPhase1CreateVerificationInProgressReservationFailsCleanly(t *testing.T) {
+	store := newVerifierStoreWithDefaults(t)
+	handler := newTestVerifierHandlerWithStore(t, store)
+	body := loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")
+	var requestPayload verificationSubmissionRequestPayload
+	if err := json.Unmarshal([]byte(body), &requestPayload); err != nil {
+		t.Fatalf("decode request fixture: %v", err)
+	}
+
+	if _, err := store.ReserveIdempotencyRecord(context.Background(), phase1.IdempotencyRecord{
+		Operation:            verifierCreateScope,
+		CallerPrincipalID:    "verifier_integrator_alpha",
+		CallerOrganizationID: "verifier_org_marketplace_alpha",
+		CallerActorType:      "verifier_integrator",
+		IdempotencyKey:       "verify-in-progress-1",
+		RequestFingerprint:   verificationSubmissionFingerprint(requestPayload),
+		ResourceType:         "verification",
+		CreatedAt:            time.Now().UTC(),
+		UpdatedAt:            time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("reserve idempotency record: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/verifier/verifications", strings.NewReader(body))
+	request.Header.Set("Idempotency-Key", "verify-in-progress-1")
+	setVerifierPhase1Headers(request, []string{verifierCreateScope})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", recorder.Code)
+	}
+
+	var response httpx.ErrorEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Error.Code != "idempotency_in_progress" {
+		t.Fatalf("unexpected error response: %+v", response)
+	}
+}
+
 func TestPhase1GetVerificationHandler(t *testing.T) {
 	store := newVerifierStoreWithDefaults(t)
 	handler := newTestVerifierHandlerWithStore(t, store)
@@ -547,15 +590,7 @@ func TestPhase1CreateVerificationUsesExplicitTrustAdapter(t *testing.T) {
 	handler := newMuxWithPhase1Handler(
 		slog.Default(),
 		testVerifierConfig(t),
-		&phase1VerifierHandler{
-			verifierExtractor: authctx.HeaderVerifierIntegratorExtractor{},
-			trusts:            trusts,
-			credentials:       store,
-			requests:          store,
-			results:           store,
-			idempotency:       store,
-			audits:            store,
-		},
+		newPhase1VerifierHandlerWithStoreAndTrust(store, trusts),
 	)
 
 	request := httptest.NewRequest(
@@ -583,6 +618,119 @@ func TestPhase1CreateVerificationUsesExplicitTrustAdapter(t *testing.T) {
 
 	if response.Decision != "deny" || len(response.ReasonCodes) != 1 || response.ReasonCodes[0] != "issuer_suspended" {
 		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestPhase1PrimarySQLVerificationRoundTrip(t *testing.T) {
+	dsn := os.Getenv("HDIP_PHASE1_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("HDIP_PHASE1_TEST_DATABASE_URL is not set")
+	}
+
+	sqlStore, err := phase1sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open sql store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sqlStore.Close()
+	})
+
+	store, err := phase1.OpenStore(phase1.StoreOptions{
+		DatabaseDriver: "pgx",
+		DatabaseURL:    dsn,
+	})
+	if err != nil {
+		t.Fatalf("open runtime store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+
+	if err := store.SeedCredentialRecord(defaultVerifierCredentialRecord()); err != nil {
+		t.Fatalf("seed credential record: %v", err)
+	}
+
+	trustServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issuerId":"did:web:issuer.hdip.dev","trustState":"active","allowedTemplateIds":["hdip-passport-basic"],"verificationKeyReferences":["key:issuer.hdip.dev:2026-04"]}`))
+	}))
+	defer trustServer.Close()
+
+	trusts, err := phase1.NewTrustReadClient(trustServer.URL, trustServer.Client())
+	if err != nil {
+		t.Fatalf("new trust client: %v", err)
+	}
+
+	handler := newMuxWithPhase1Handler(
+		slog.Default(),
+		testVerifierConfig(t),
+		newPhase1VerifierHandlerWithStoreAndTrust(store, trusts),
+	)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/verifier/verifications",
+		strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
+	)
+	setVerifierPhase1Headers(request, []string{verifierCreateScope})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+
+	var response verificationResultPayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode verification response: %v", err)
+	}
+
+	requestRecord, err := sqlStore.GetVerificationRequestRecord(context.Background(), response.VerificationID)
+	if err != nil {
+		t.Fatalf("load verification request from sql store: %v", err)
+	}
+	if requestRecord.VerifierID != "verifier_org_marketplace_alpha" {
+		t.Fatalf("unexpected stored verification request: %+v", requestRecord)
+	}
+
+	resultRecord, err := sqlStore.GetVerificationResultRecord(context.Background(), response.VerificationID)
+	if err != nil {
+		t.Fatalf("load verification result from sql store: %v", err)
+	}
+	if resultRecord.Decision != "allow" {
+		t.Fatalf("unexpected stored verification result: %+v", resultRecord)
+	}
+
+	if err := store.UpdateCredentialStatus(
+		context.Background(),
+		defaultVerifierCredentialRecord().CredentialID,
+		phase1.CredentialStatusSnapshotRevoked,
+		time.Now().UTC(),
+		"",
+	); err != nil {
+		t.Fatalf("update credential status: %v", err)
+	}
+
+	secondRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/verifier/verifications",
+		strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
+	)
+	setVerifierPhase1Headers(secondRequest, []string{verifierCreateScope})
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, secondRequest)
+
+	if secondRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201 after status transition, got %d", secondRecorder.Code)
+	}
+
+	var denied verificationResultPayload
+	if err := json.Unmarshal(secondRecorder.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("decode second verification response: %v", err)
+	}
+
+	if denied.Decision != "deny" || denied.CredentialStatus != "revoked" {
+		t.Fatalf("unexpected denied response: %+v", denied)
 	}
 }
 
@@ -628,15 +776,16 @@ func testVerifierConfig(t *testing.T) config.Config {
 	t.Helper()
 
 	return config.Config{
-		ServiceName:       "verifier-api",
-		Host:              "127.0.0.1",
-		Port:              8082,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		Phase1StatePath:   filepath.Join(t.TempDir(), "verifier-phase1-state.json"),
-		BuildVersion:      "test",
+		ServiceName:          "verifier-api",
+		Host:                 "127.0.0.1",
+		Port:                 8082,
+		LogLevel:             "INFO",
+		RequestTimeout:       time.Second,
+		ReadHeaderTimeout:    time.Second,
+		ShutdownTimeout:      time.Second,
+		Phase1StatePath:      filepath.Join(t.TempDir(), "verifier-phase1-state.json"),
+		TrustRegistryBaseURL: "http://127.0.0.1:19083",
+		BuildVersion:         "test",
 	}
 }
 

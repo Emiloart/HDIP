@@ -22,18 +22,34 @@ func TestLoadUsesDefaults(t *testing.T) {
 
 func TestValidateRejectsInvalidPort(t *testing.T) {
 	cfg := Config{
-		ServiceName:       serviceName,
-		Host:              "127.0.0.1",
-		Port:              -1,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		BuildVersion:      "dev",
+		ServiceName:          serviceName,
+		Host:                 "127.0.0.1",
+		Port:                 -1,
+		LogLevel:             "INFO",
+		RequestTimeout:       time.Second,
+		ReadHeaderTimeout:    time.Second,
+		ShutdownTimeout:      time.Second,
+		Phase1DatabaseDriver: "pgx",
+		Phase1StatePath:      "phase1-state.json",
+		BuildVersion:         "dev",
 	}
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestLoadReadsDatabaseSettings(t *testing.T) {
+	t.Setenv("HDIP_PHASE1_DATABASE_DRIVER", "sqlite")
+	t.Setenv("HDIP_PHASE1_DATABASE_URL", "file:test.db?mode=memory&cache=shared")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Phase1DatabaseDriver != "sqlite" || cfg.Phase1DatabaseURL == "" {
+		t.Fatalf("unexpected database config: %+v", cfg)
 	}
 }
 

@@ -13,15 +13,17 @@ import (
 const serviceName = "issuer-api"
 
 type Config struct {
-	ServiceName       string
-	Host              string
-	Port              int
-	LogLevel          string
-	RequestTimeout    time.Duration
-	ReadHeaderTimeout time.Duration
-	ShutdownTimeout   time.Duration
-	Phase1StatePath   string
-	BuildVersion      string
+	ServiceName          string
+	Host                 string
+	Port                 int
+	LogLevel             string
+	RequestTimeout       time.Duration
+	ReadHeaderTimeout    time.Duration
+	ShutdownTimeout      time.Duration
+	Phase1DatabaseDriver string
+	Phase1DatabaseURL    string
+	Phase1StatePath      string
+	BuildVersion         string
 }
 
 func Load() (Config, error) {
@@ -46,15 +48,17 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		ServiceName:       serviceName,
-		Host:              getenv("HDIP_HOST", "127.0.0.1"),
-		Port:              port,
-		LogLevel:          getenv("HDIP_LOG_LEVEL", "INFO"),
-		RequestTimeout:    requestTimeout,
-		ReadHeaderTimeout: readHeaderTimeout,
-		ShutdownTimeout:   shutdownTimeout,
-		Phase1StatePath:   phase1StatePath(),
-		BuildVersion:      getenv("HDIP_BUILD_VERSION", "dev"),
+		ServiceName:          serviceName,
+		Host:                 getenv("HDIP_HOST", "127.0.0.1"),
+		Port:                 port,
+		LogLevel:             getenv("HDIP_LOG_LEVEL", "INFO"),
+		RequestTimeout:       requestTimeout,
+		ReadHeaderTimeout:    readHeaderTimeout,
+		ShutdownTimeout:      shutdownTimeout,
+		Phase1DatabaseDriver: getenv("HDIP_PHASE1_DATABASE_DRIVER", "pgx"),
+		Phase1DatabaseURL:    getenv("HDIP_PHASE1_DATABASE_URL", ""),
+		Phase1StatePath:      phase1StatePath(),
+		BuildVersion:         getenv("HDIP_BUILD_VERSION", "dev"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -76,8 +80,8 @@ func (c Config) Validate() error {
 		return errors.New("read header timeout must be positive")
 	case c.ShutdownTimeout <= 0:
 		return errors.New("shutdown timeout must be positive")
-	case strings.TrimSpace(c.Phase1StatePath) == "":
-		return errors.New("phase1 state path must not be empty")
+	case strings.TrimSpace(c.Phase1DatabaseURL) == "" && strings.TrimSpace(c.Phase1StatePath) == "":
+		return errors.New("phase1 database url or transitional state path must be configured")
 	default:
 		return nil
 	}
