@@ -1,9 +1,9 @@
 {
   "policyId": "kyc-passport-basic",
   "verifierId": "verifier_marketplace_alpha",
-  "signedCredential": {
-    "format": "sd_jwt_vc",
-    "mediaType": "application/vc+sd-jwt",
-    "value": "eyJhbGciOiJFUzI1NiJ9.placeholder.credential"
+  "credentialArtifact": {
+    "kind": "phase1_opaque_artifact",
+    "mediaType": "application/vnd.hdip.phase1-opaque-artifact",
+    "value": "opaque-artifact:cred_hdip_passport_basic_001:v1"
   }
 }

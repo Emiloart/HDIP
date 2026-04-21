@@ -15,7 +15,7 @@ const (
 	issuerIssueScope        = "issuer.credentials.issue"
 	issuerReadScope         = "issuer.credentials.read"
 	placeholderCredentialID = "cred_hdip_passport_basic_001"
-	placeholderArtifactHash = "3a3d9fbf43cf1769b1485596ddc44f4d2d9df7f47f5f70b9771af35fb0dcb2ef"
+	placeholderArtifactHash = "4262d0aacabb3bd709a5cd7abb52c0eb8be0d15d02f1e8e2e11c45bc5071502e"
 )
 
 var (
@@ -45,38 +45,38 @@ type issuanceKYCClaimsPayload struct {
 	ExpiresAt          time.Time `json:"expiresAt"`
 }
 
-type signedCredentialPayload struct {
-	Format    string `json:"format"`
+type credentialArtifactPayload struct {
+	Kind      string `json:"kind"`
 	MediaType string `json:"mediaType"`
 	Value     string `json:"value"`
 }
 
 type issuanceResponsePayload struct {
-	CredentialID     string                  `json:"credentialId"`
-	IssuerID         string                  `json:"issuerId"`
-	TemplateID       string                  `json:"templateId"`
-	Status           string                  `json:"status"`
-	IssuedAt         time.Time               `json:"issuedAt"`
-	ExpiresAt        time.Time               `json:"expiresAt"`
-	StatusReference  string                  `json:"statusReference"`
-	SignedCredential signedCredentialPayload `json:"signedCredential"`
+	CredentialID       string                    `json:"credentialId"`
+	IssuerID           string                    `json:"issuerId"`
+	TemplateID         string                    `json:"templateId"`
+	Status             string                    `json:"status"`
+	IssuedAt           time.Time                 `json:"issuedAt"`
+	ExpiresAt          time.Time                 `json:"expiresAt"`
+	StatusReference    string                    `json:"statusReference"`
+	CredentialArtifact credentialArtifactPayload `json:"credentialArtifact"`
 }
 
 type credentialRecordPayload struct {
-	CredentialID             string                   `json:"credentialId"`
-	IssuerID                 string                   `json:"issuerId"`
-	TemplateID               string                   `json:"templateId"`
-	SubjectReference         string                   `json:"subjectReference"`
-	Claims                   issuanceKYCClaimsPayload `json:"claims"`
-	ArtifactDigest           string                   `json:"artifactDigest"`
-	Status                   string                   `json:"status"`
-	StatusReference          string                   `json:"statusReference"`
-	IssuedAt                 time.Time                `json:"issuedAt"`
-	ExpiresAt                time.Time                `json:"expiresAt"`
-	StatusUpdatedAt          time.Time                `json:"statusUpdatedAt"`
-	SupersededByCredentialID string                   `json:"supersededByCredentialId,omitempty"`
-	SignedCredential         *signedCredentialPayload `json:"signedCredential,omitempty"`
-	ArtifactReference        string                   `json:"artifactReference,omitempty"`
+	CredentialID             string                     `json:"credentialId"`
+	IssuerID                 string                     `json:"issuerId"`
+	TemplateID               string                     `json:"templateId"`
+	SubjectReference         string                     `json:"subjectReference"`
+	Claims                   issuanceKYCClaimsPayload   `json:"claims"`
+	ArtifactDigest           string                     `json:"artifactDigest"`
+	Status                   string                     `json:"status"`
+	StatusReference          string                     `json:"statusReference"`
+	IssuedAt                 time.Time                  `json:"issuedAt"`
+	ExpiresAt                time.Time                  `json:"expiresAt"`
+	StatusUpdatedAt          time.Time                  `json:"statusUpdatedAt"`
+	SupersededByCredentialID string                     `json:"supersededByCredentialId,omitempty"`
+	CredentialArtifact       *credentialArtifactPayload `json:"credentialArtifact,omitempty"`
+	ArtifactReference        string                     `json:"artifactReference,omitempty"`
 }
 
 func newPhase1IssuerHandler() *phase1IssuerHandler {
@@ -132,10 +132,10 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 			ExpiresAt:          request.Claims.ExpiresAt,
 		},
 		ArtifactDigest: placeholderArtifactHash,
-		SignedCredential: &phase1.SignedCredentialArtifact{
-			Format:    "sd_jwt_vc",
-			MediaType: "application/vc+sd-jwt",
-			Value:     "eyJhbGciOiJFUzI1NiJ9.placeholder.credential",
+		CredentialArtifact: &phase1.CredentialArtifact{
+			Kind:      "phase1_opaque_artifact",
+			MediaType: "application/vnd.hdip.phase1-opaque-artifact",
+			Value:     "opaque-artifact:cred_hdip_passport_basic_001:v1",
 		},
 		Status:          phase1.CredentialStatusActive,
 		StatusReference: statusReferenceForCredential(placeholderCredentialID),
@@ -171,10 +171,10 @@ func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Req
 		IssuedAt:        record.IssuedAt,
 		ExpiresAt:       record.ExpiresAt,
 		StatusReference: record.StatusReference,
-		SignedCredential: signedCredentialPayload{
-			Format:    record.SignedCredential.Format,
-			MediaType: record.SignedCredential.MediaType,
-			Value:     record.SignedCredential.Value,
+		CredentialArtifact: credentialArtifactPayload{
+			Kind:      record.CredentialArtifact.Kind,
+			MediaType: record.CredentialArtifact.MediaType,
+			Value:     record.CredentialArtifact.Value,
 		},
 	})
 }
@@ -222,7 +222,7 @@ func (h *phase1IssuerHandler) getCredential(w http.ResponseWriter, r *http.Reque
 		ExpiresAt:                record.ExpiresAt,
 		StatusUpdatedAt:          record.StatusUpdatedAt,
 		SupersededByCredentialID: record.SupersededByCredentialID,
-		SignedCredential:         signedCredentialPayloadFromRecord(record.SignedCredential),
+		CredentialArtifact:       credentialArtifactPayloadFromRecord(record.CredentialArtifact),
 		ArtifactReference:        record.ArtifactReference,
 	})
 }
@@ -294,13 +294,13 @@ func claimsPayloadFromRecord(record phase1.KYCClaims) issuanceKYCClaimsPayload {
 	}
 }
 
-func signedCredentialPayloadFromRecord(record *phase1.SignedCredentialArtifact) *signedCredentialPayload {
+func credentialArtifactPayloadFromRecord(record *phase1.CredentialArtifact) *credentialArtifactPayload {
 	if record == nil {
 		return nil
 	}
 
-	return &signedCredentialPayload{
-		Format:    record.Format,
+	return &credentialArtifactPayload{
+		Kind:      record.Kind,
 		MediaType: record.MediaType,
 		Value:     record.Value,
 	}

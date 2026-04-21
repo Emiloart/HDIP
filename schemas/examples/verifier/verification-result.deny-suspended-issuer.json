@@ -1,0 +1,11 @@
+{
+  "verificationId": "verification_hdip_002",
+  "credentialId": "cred_hdip_passport_basic_002",
+  "issuerId": "did:web:issuer.hdip.dev",
+  "decision": "deny",
+  "reasonCodes": [
+    "issuer_suspended"
+  ],
+  "evaluatedAt": "2026-04-20T09:06:00Z",
+  "credentialStatus": "active"
+}

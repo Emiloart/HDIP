@@ -99,7 +99,7 @@
     {
       "contract": "issuanceResponse",
       "schema": "credentials/issuance-response.schema.json",
-      "fixture": "issuer/issuance-response.missing-signed-credential.invalid.json",
+      "fixture": "issuer/issuance-response.missing-credential-artifact.invalid.json",
       "valid": false
     },
     {
@@ -142,6 +142,12 @@
       "contract": "verificationResult",
       "schema": "verifier/verification-result.schema.json",
       "fixture": "verifier/verification-result.allow.json",
+      "valid": true
+    },
+    {
+      "contract": "verificationResult",
+      "schema": "verifier/verification-result.schema.json",
+      "fixture": "verifier/verification-result.deny-suspended-issuer.json",
       "valid": true
     },
     {

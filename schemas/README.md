@@ -23,3 +23,4 @@ The foundation slice currently enforces example-based parity for:
 - Phase 1 audit record
 
 Stub metadata contracts remain separate from the future real Phase 1 write and read contracts.
+Deterministic Phase 1 contracts use an opaque `credentialArtifact` model, not a signed or proof-bearing artifact.

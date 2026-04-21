@@ -9,6 +9,8 @@
 HDIP has a landed foundation slice, hardening fixes, schema/example parity, and a deterministic stub issuer/verifier flow.
 That state is sufficient to start Phase 1 work, but it does not yet define what the first real reusable KYC credential is, what is actually issued, what a verifier submits for evaluation, or which current services own that logic.
 
+ADR 0009 clarifies the deterministic Phase 1 artifact semantics and partially supersedes earlier ambiguous "signed credential artifact" wording in this record.
+
 Phase 1 must stay narrow:
 
 - one reusable KYC credential
@@ -45,7 +47,7 @@ Phase 1 does not include raw document numbers, document images, liveness media, 
 ### What the credential record is in Phase 1
 
 The Phase 1 credential record is the authoritative HDIP control-plane record for one issued reusable KYC credential.
-It is not only a copy of the signed artifact and it is not only a UI summary.
+It is not only a copy of the issued Phase 1 credential artifact and it is not only a UI summary.
 
 At the contract boundary, the credential record consists of:
 
@@ -56,22 +58,23 @@ At the contract boundary, the credential record consists of:
 - issuance timestamps
 - current credential status
 - a status reference usable by verifier evaluation
-- a digest of the issued artifact
-- the issued artifact itself or a durable retrieval reference owned by `issuer-api`
+- a digest of the issued Phase 1 credential artifact
+- the Phase 1 opaque credential artifact itself or a durable retrieval reference owned by `issuer-api`
 
 ### What is issued vs referenced
 
 What is issued in Phase 1:
 
-- a signed reusable KYC credential artifact
+- an issuer-produced opaque Phase 1 credential artifact as clarified by ADR 0009
 - a stable `credentialId`
 - a status reference tied to that credential
 
 What is referenced in Phase 1 verification:
 
-- the signed credential artifact is the primary verifier submission payload
+- the opaque credential artifact is the primary verifier submission payload
 - `credentialId` may be supplied as an optimization or traceability aid, but it is not trusted without matching the submitted artifact and issuer context
 - verifier evaluation references persisted credential status and issuer trust state; it does not rely on raw KYC onboarding evidence
+- the verifier does not treat the Phase 1 artifact as cryptographically verifiable
 
 ### Service ownership in Phase 1
 
@@ -127,7 +130,7 @@ The response boundary includes:
 - `issuedAt`
 - `expiresAt`
 - `statusReference`
-- the signed credential artifact
+- the opaque Phase 1 credential artifact
 
 ### Verification submission and result boundary
 
@@ -138,7 +141,7 @@ Phase 1 verification uses a dedicated write endpoint under `verifier-api`:
 The request boundary includes:
 
 - `policyId`
-- the signed credential artifact
+- the opaque credential artifact
 - optional `credentialId` for traceability
 - optional caller-supplied idempotency key via header or transport metadata
 
@@ -154,6 +157,8 @@ The response boundary includes:
 - `reasonCodes`
 - `evaluatedAt`
 - the credential status snapshot used for the decision
+
+Suspended or otherwise non-active issuer trust state returns `deny` in deterministic Phase 1 as clarified by ADR 0009.
 
 `GET /v1/verifier/verifications/{verificationId}` is part of the Phase 1 read boundary for verifier-owned retrieval and auditability.
 
@@ -206,14 +211,15 @@ Later migration to dedicated issuance or verification services is allowed, but o
 ## Consequences
 
 - the existing stub metadata endpoints remain read-only foundation behavior and are not the real Phase 1 issuance or verification APIs
-- the first real verifier flow will evaluate a submitted credential artifact, not a proof or wallet presentation
+- the first real verifier flow will evaluate a submitted opaque credential artifact, not a proof or wallet presentation
 - `issuer-api` and `verifier-api` will own real business logic in Phase 1, which keeps the slice implementable without activating every deferred service
 - the next implementation slice must add new schema contracts instead of silently reusing stub result semantics as the product contract
+- deterministic Phase 1 slices must not describe the artifact as signed or cryptographically verifiable
 
 ## Open questions
 
 - whether the final Phase 1 name claim should remain `fullLegalName` or split into separate name fields
-- whether the signed artifact is returned inline only or also retrievable through an issuer-authenticated read endpoint in the first issuance slice
+- whether the opaque artifact is returned inline only or also retrievable through an issuer-authenticated read endpoint in the first issuance slice
 - whether `reasonCodes` should be paired with optional human-readable messages in the initial verification result contract
 
 ## Related plans, PRs, and issues
@@ -221,4 +227,5 @@ Later migration to dedicated issuance or verification services is allowed, but o
 - `docs/plans/active/0006-phase1-kyc-credential-and-verifier-api.md`
 - `docs/adr/0007-phase1-state-and-persistence-model.md`
 - `docs/adr/0008-phase1-auth-and-attribution-boundary.md`
+- `docs/adr/0009-phase1-opaque-artifact-and-suspended-issuer-policy.md`
 - `docs/threat-model/full/0003-phase1-kyc-issuance-verification-and-auth.md`

@@ -16,7 +16,7 @@ const (
 	verifierReadScope          = "verifier.results.read"
 	placeholderVerificationID  = "verification_hdip_001"
 	placeholderVerificationDID = "did:web:issuer.hdip.dev"
-	placeholderArtifactHash    = "3a3d9fbf43cf1769b1485596ddc44f4d2d9df7f47f5f70b9771af35fb0dcb2ef"
+	placeholderArtifactHash    = "4262d0aacabb3bd709a5cd7abb52c0eb8be0d15d02f1e8e2e11c45bc5071502e"
 )
 
 var placeholderEvaluatedAt = time.Date(2026, time.April, 20, 9, 5, 0, 0, time.UTC)
@@ -29,16 +29,16 @@ type phase1VerifierHandler struct {
 	audits            phase1.AuditRecordRepository
 }
 
-type verifierSignedCredentialPayload struct {
-	Format    string `json:"format"`
+type verifierCredentialArtifactPayload struct {
+	Kind      string `json:"kind"`
 	MediaType string `json:"mediaType"`
 	Value     string `json:"value"`
 }
 
 type verificationSubmissionRequestPayload struct {
-	PolicyID         string                          `json:"policyId"`
-	CredentialID     string                          `json:"credentialId,omitempty"`
-	SignedCredential verifierSignedCredentialPayload `json:"signedCredential"`
+	PolicyID           string                            `json:"policyId"`
+	CredentialID       string                            `json:"credentialId,omitempty"`
+	CredentialArtifact verifierCredentialArtifactPayload `json:"credentialArtifact"`
 }
 
 type verificationResultPayload struct {
@@ -212,12 +212,12 @@ func (p verificationSubmissionRequestPayload) validate() error {
 	switch {
 	case strings.TrimSpace(p.PolicyID) == "":
 		return errors.New("policyId must not be empty")
-	case strings.TrimSpace(p.SignedCredential.Format) == "":
-		return errors.New("signedCredential.format must not be empty")
-	case strings.TrimSpace(p.SignedCredential.MediaType) == "":
-		return errors.New("signedCredential.mediaType must not be empty")
-	case strings.TrimSpace(p.SignedCredential.Value) == "":
-		return errors.New("signedCredential.value must not be empty")
+	case strings.TrimSpace(p.CredentialArtifact.Kind) == "":
+		return errors.New("credentialArtifact.kind must not be empty")
+	case strings.TrimSpace(p.CredentialArtifact.MediaType) == "":
+		return errors.New("credentialArtifact.mediaType must not be empty")
+	case strings.TrimSpace(p.CredentialArtifact.Value) == "":
+		return errors.New("credentialArtifact.value must not be empty")
 	default:
 		return nil
 	}

@@ -28,8 +28,8 @@ type KYCClaims struct {
 	ExpiresAt          time.Time
 }
 
-type SignedCredentialArtifact struct {
-	Format    string
+type CredentialArtifact struct {
+	Kind      string
 	MediaType string
 	Value     string
 }
@@ -51,7 +51,7 @@ type CredentialRecord struct {
 	SubjectReference         string
 	Claims                   KYCClaims
 	ArtifactDigest           string
-	SignedCredential         *SignedCredentialArtifact
+	CredentialArtifact       *CredentialArtifact
 	ArtifactReference        string
 	Status                   CredentialStatus
 	StatusReference          string

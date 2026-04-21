@@ -53,6 +53,7 @@ Lock the Phase 1 design baseline for a reusable KYC credential and a real verifi
 - Phase 1 can use a relational persistence model compatible with the accepted CockroachDB baseline without forcing full production topology decisions in the first code slice.
 - Phase 1 auth can be implemented behind narrow service-edge abstractions that remain compatible with the accepted OIDC/OAuth direction from ADR 0002.
 - Raw KYC evidence ingestion is outside the Phase 1 issuance API; the issuer boundary receives normalized, already-verified KYC claims.
+- Deterministic Phase 1 slices use the opaque credential artifact and suspended-issuer `deny` policy clarified in ADR 0009.
 
 ## Risks
 
@@ -119,7 +120,7 @@ Do not partially implement issuance, verification, or auth against a superseded 
 
 - implement issuance request validation against the new schemas
 - persist credential records and issuance audit records
-- produce the Phase 1 signed reusable KYC credential artifact
+- produce the Phase 1 opaque credential artifact defined by ADR 0009
 - add issuer-side credential retrieval and status mutation endpoints for the issuing operator
 
 ### Slice 5: Real verifier flow
@@ -127,6 +128,7 @@ Do not partially implement issuance, verification, or auth against a superseded 
 - implement verification submission and result persistence
 - evaluate the submitted credential deterministically against:
   - issuer trust lookup
+  - non-active issuer trust state -> `deny`
   - credential status
   - expiry
   - template compatibility

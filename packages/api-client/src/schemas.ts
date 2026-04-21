@@ -9,9 +9,9 @@ const verificationCredentialStatusValueSchema = z.enum([
   "superseded",
   "expired",
 ]);
-const signedCredentialSchema = z.object({
-  format: z.literal("sd_jwt_vc"),
-  mediaType: z.literal("application/vc+sd-jwt"),
+const credentialArtifactSchema = z.object({
+  kind: z.literal("phase1_opaque_artifact"),
+  mediaType: z.literal("application/vnd.hdip.phase1-opaque-artifact"),
   value: z.string().min(1),
 }).strict();
 const kycClaimsSchema = z.object({
@@ -78,7 +78,7 @@ export const issuanceResponseSchema = z.object({
   issuedAt: z.iso.datetime({ offset: true }),
   expiresAt: z.iso.datetime({ offset: true }),
   statusReference: z.string().min(1),
-  signedCredential: signedCredentialSchema,
+  credentialArtifact: credentialArtifactSchema,
 }).strict();
 
 export const credentialStatusSchema = z.object({
@@ -104,24 +104,24 @@ export const credentialRecordSchema = z
     expiresAt: z.iso.datetime({ offset: true }),
     statusUpdatedAt: z.iso.datetime({ offset: true }),
     supersededByCredentialId: z.string().min(1).optional(),
-    signedCredential: signedCredentialSchema.optional(),
+    credentialArtifact: credentialArtifactSchema.optional(),
     artifactReference: z.string().min(1).optional(),
   })
   .strict()
   .refine(
     (value) =>
-      (value.signedCredential !== undefined && value.artifactReference === undefined) ||
-      (value.signedCredential === undefined && value.artifactReference !== undefined),
+      (value.credentialArtifact !== undefined && value.artifactReference === undefined) ||
+      (value.credentialArtifact === undefined && value.artifactReference !== undefined),
     {
-      message: "credential record must include either signedCredential or artifactReference",
-      path: ["signedCredential"],
+      message: "credential record must include either credentialArtifact or artifactReference",
+      path: ["credentialArtifact"],
     },
   );
 
 export const verificationSubmissionRequestSchema = z.object({
   policyId: z.string().min(1),
   credentialId: z.string().min(1).optional(),
-  signedCredential: signedCredentialSchema,
+  credentialArtifact: credentialArtifactSchema,
 }).strict();
 
 export const verificationResultSchema = z.object({

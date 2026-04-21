@@ -178,4 +178,5 @@ Later migration to richer authz systems is allowed only if the minimum issuer an
 - `docs/plans/active/0006-phase1-kyc-credential-and-verifier-api.md`
 - `docs/adr/0006-phase1-credential-and-issuance-boundary.md`
 - `docs/adr/0007-phase1-state-and-persistence-model.md`
+- `docs/adr/0009-phase1-opaque-artifact-and-suspended-issuer-policy.md`
 - `docs/threat-model/full/0003-phase1-kyc-issuance-verification-and-auth.md`

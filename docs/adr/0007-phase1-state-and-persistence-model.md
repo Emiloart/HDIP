@@ -11,6 +11,8 @@ The current repo has no runtime persistence model, and Phase 1 cannot be impleme
 
 At the same time, the repo should not overcommit to the full long-term platform storage topology before the first real reusable KYC flow exists.
 
+ADR 0009 clarifies the deterministic Phase 1 artifact semantics and resolves suspended-issuer verifier behavior for the purposes of this record.
+
 ## Decision
 
 ### Minimum persisted entity set for Phase 1
@@ -51,7 +53,7 @@ It includes the minimum data required to support reuse, verification, status che
 - `subjectReference`
 - normalized KYC claims
 - artifact digest
-- issued artifact or durable artifact retrieval reference
+- issued opaque Phase 1 artifact or durable artifact retrieval reference
 - `issuedAt`
 - `expiresAt`
 - current credential status
@@ -74,7 +76,7 @@ It includes:
 - attribution fields from the authenticated caller context
 - idempotency key when supplied
 
-The full submitted credential artifact should not be duplicated into the verification request record by default.
+The full submitted opaque credential artifact should not be duplicated into the verification request record by default.
 If temporary raw artifact storage is needed for evaluation, it must be bounded to the request lifecycle rather than becoming the durable request record.
 
 ### Verification result records
@@ -139,6 +141,8 @@ Instead, `credential_record` owns the authoritative status fields while preservi
 
 - issuer trust activation or suspension
 - verification-key reference changes
+
+For deterministic Phase 1 verifier behavior, non-active issuer trust state results in verifier decision `deny` as clarified by ADR 0009.
 
 `audit_record` is written by whichever service performs the transition or sensitive read.
 
@@ -209,12 +213,12 @@ Do not introduce new persisted entity classes casually during Phase 1 implementa
 ## Open questions
 
 - whether verification request retention needs a shorter operational window than verification result retention
-- whether the initial artifact retrieval strategy should store the full signed credential inline or in bounded object storage behind the same logical record
-- whether issuer suspension in `trust-registry` should automatically force all future verifier decisions to `deny` or `review`
+- whether the initial artifact retrieval strategy should store the full opaque artifact inline or in bounded object storage behind the same logical record
 
 ## Related plans, PRs, and issues
 
 - `docs/plans/active/0006-phase1-kyc-credential-and-verifier-api.md`
 - `docs/adr/0006-phase1-credential-and-issuance-boundary.md`
 - `docs/adr/0008-phase1-auth-and-attribution-boundary.md`
+- `docs/adr/0009-phase1-opaque-artifact-and-suspended-issuer-policy.md`
 - `docs/threat-model/full/0003-phase1-kyc-issuance-verification-and-auth.md`
