@@ -33,11 +33,16 @@ var verificationBaseTime = time.Date(2026, time.April, 20, 9, 5, 0, 0, time.UTC)
 type phase1VerifierHandler struct {
 	verifierExtractor authctx.VerifierIntegratorExtractor
 	store             *phase1.RuntimeStore
+	trustRuntimeReady phase1ReadinessProbe
 	trusts            phase1.TrustReadRepository
 	credentials       phase1.CredentialRecordRepository
 	requests          phase1.VerificationRequestRepository
 	results           phase1.VerificationResultRepository
 	audits            phase1.AuditRecordRepository
+}
+
+type phase1ReadinessProbe interface {
+	Check(context.Context) error
 }
 
 type verifierCredentialArtifactPayload struct {
@@ -71,9 +76,10 @@ type credentialArtifactEnvelope struct {
 
 func newPhase1VerifierHandler(cfg config.Config) (*phase1VerifierHandler, error) {
 	store, err := phase1.OpenStore(phase1.StoreOptions{
-		DatabaseDriver:  cfg.Phase1DatabaseDriver,
-		DatabaseURL:     cfg.Phase1DatabaseURL,
-		LegacyStatePath: cfg.Phase1StatePath,
+		RuntimeMode:           cfg.Phase1RuntimeMode,
+		DatabaseDriver:        cfg.Phase1DatabaseDriver,
+		DatabaseURL:           cfg.Phase1DatabaseURL,
+		TransitionalStatePath: cfg.Phase1StatePath,
 	})
 	if err != nil {
 		return nil, err
@@ -99,16 +105,24 @@ func newPhase1VerifierHandler(cfg config.Config) (*phase1VerifierHandler, error)
 		return nil, err
 	}
 
-	return newPhase1VerifierHandlerWithStoreAndTrust(store, trusts), nil
+	return newPhase1VerifierHandlerWithStoreAndTrustAndReadiness(store, trusts, tokenSource), nil
 }
 
 func newPhase1VerifierHandlerWithStore(store *phase1.RuntimeStore) *phase1VerifierHandler {
-	return newPhase1VerifierHandlerWithStoreAndTrust(store, store)
+	return newPhase1VerifierHandlerWithStoreAndTrustAndReadiness(store, store, nil)
 }
 
 func newPhase1VerifierHandlerWithStoreAndTrust(
 	store *phase1.RuntimeStore,
 	trusts phase1.TrustReadRepository,
+) *phase1VerifierHandler {
+	return newPhase1VerifierHandlerWithStoreAndTrustAndReadiness(store, trusts, nil)
+}
+
+func newPhase1VerifierHandlerWithStoreAndTrustAndReadiness(
+	store *phase1.RuntimeStore,
+	trusts phase1.TrustReadRepository,
+	trustRuntimeReady phase1ReadinessProbe,
 ) *phase1VerifierHandler {
 	if trusts == nil {
 		trusts = store
@@ -117,12 +131,30 @@ func newPhase1VerifierHandlerWithStoreAndTrust(
 	return &phase1VerifierHandler{
 		verifierExtractor: authctx.HeaderVerifierIntegratorExtractor{},
 		store:             store,
+		trustRuntimeReady: trustRuntimeReady,
 		trusts:            trusts,
 		credentials:       store,
 		requests:          store,
 		results:           store,
 		audits:            store,
 	}
+}
+
+func (h *phase1VerifierHandler) readiness(ctx context.Context) error {
+	if err := h.store.CheckReadiness(ctx, true); err != nil {
+		return err
+	}
+	if h.trustRuntimeReady != nil {
+		if err := h.trustRuntimeReady.Check(ctx); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (h *phase1VerifierHandler) runtimeMode() string {
+	return h.store.RuntimeMode()
 }
 
 func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *http.Request) {
@@ -441,7 +473,11 @@ func (h *phase1VerifierHandler) evaluateVerification(
 	result.IssuerID = credentialRecord.IssuerID
 	trustRecord, err := h.trusts.GetIssuerTrustRecord(ctx, credentialRecord.IssuerID)
 	if err != nil {
-		result.IssuerTrustState = "missing"
+		if errors.Is(err, phase1.ErrTrustRuntimeUnavailable) {
+			result.IssuerTrustState = "unavailable"
+		} else {
+			result.IssuerTrustState = "missing"
+		}
 		result.ReasonCodes = []string{"issuer_not_trusted"}
 		return result
 	}

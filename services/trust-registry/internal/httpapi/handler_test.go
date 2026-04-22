@@ -25,6 +25,7 @@ func TestHealthHandler(t *testing.T) {
 		RequestTimeout:                    time.Second,
 		ReadHeaderTimeout:                 time.Second,
 		ShutdownTimeout:                   time.Second,
+		Phase1RuntimeMode:                 phase1.RuntimeModeTransitionalJSON,
 		Phase1StatePath:                   t.TempDir() + "\\trust-phase1-state.json",
 		TrustRuntimeHydraIntrospectionURL: "http://127.0.0.1:4445/admin/oauth2/introspect",
 		TrustRuntimeHydraClientID:         "trust-registry",
@@ -56,6 +57,83 @@ func TestHealthHandler(t *testing.T) {
 	}
 }
 
+func TestReadyHandlerReportsTransitionalRuntimeMode(t *testing.T) {
+	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
+	if err != nil {
+		t.Fatalf("open trust store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+
+	handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
+		ServiceName:       "trust-registry",
+		Host:              "127.0.0.1",
+		Port:              8083,
+		LogLevel:          "INFO",
+		RequestTimeout:    time.Second,
+		ReadHeaderTimeout: time.Second,
+		ShutdownTimeout:   time.Second,
+		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
+		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
+		BuildVersion:      "test",
+	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}}))
+
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+
+	if runtimeMode := recorder.Header().Get("X-HDIP-Phase1-Runtime-Mode"); runtimeMode != phase1.RuntimeModeTransitionalJSON {
+		t.Fatalf("expected transitional runtime mode header, got %q", runtimeMode)
+	}
+}
+
+func TestReadyHandlerFailsClosedWhenHydraIntrospectionUnavailable(t *testing.T) {
+	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
+	if err != nil {
+		t.Fatalf("open trust store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+
+	handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
+		ServiceName:       "trust-registry",
+		Host:              "127.0.0.1",
+		Port:              8083,
+		LogLevel:          "INFO",
+		RequestTimeout:    time.Second,
+		ReadHeaderTimeout: time.Second,
+		ShutdownTimeout:   time.Second,
+		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
+		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
+		BuildVersion:      "test",
+	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{err: ErrInternalAuthUnavailable}))
+
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", recorder.Code)
+	}
+
+	var response httpx.ErrorEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Error.Code != "not_ready" || response.Error.Message != ErrInternalAuthUnavailable.Error() {
+		t.Fatalf("unexpected readiness error response: %+v", response)
+	}
+}
+
 func TestInternalPhase1IssuerTrustHandler(t *testing.T) {
 	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
 	if err != nil {
@@ -83,6 +161,7 @@ func TestInternalPhase1IssuerTrustHandler(t *testing.T) {
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
+		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
 		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
 		BuildVersion:      "test",
 	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}}))
@@ -124,6 +203,7 @@ func TestInternalPhase1IssuerTrustHandlerReturnsNotFound(t *testing.T) {
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
+		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
 		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
 		BuildVersion:      "test",
 	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}}))
@@ -156,6 +236,7 @@ func TestInternalPhase1IssuerTrustHandlerRejectsMissingInternalAuth(t *testing.T
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
+		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
 		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
 		BuildVersion:      "test",
 	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}}))
@@ -215,6 +296,7 @@ func TestInternalPhase1IssuerTrustHandlerAcceptsAuthorizedHydraIdentity(t *testi
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
+		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
 		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
 		BuildVersion:      "test",
 	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, authorizer))
@@ -289,6 +371,7 @@ func TestInternalPhase1IssuerTrustHandlerRejectsUnauthorizedHydraIdentity(t *tes
 				RequestTimeout:    time.Second,
 				ReadHeaderTimeout: time.Second,
 				ShutdownTimeout:   time.Second,
+				Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
 				Phase1StatePath:   t.TempDir() + "\\unused-state.json",
 				BuildVersion:      "test",
 			}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, authorizer))
@@ -340,6 +423,7 @@ func TestInternalPhase1IssuerTrustHandlerFailsClosedWhenHydraIntrospectionUnavai
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
+		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
 		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
 		BuildVersion:      "test",
 	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, authorizer))

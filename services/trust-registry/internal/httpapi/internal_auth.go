@@ -24,6 +24,7 @@ type internalPrincipal struct {
 
 type internalAuthorizer interface {
 	Authorize(ctx context.Context, bearerToken string) (internalPrincipal, error)
+	Check(ctx context.Context) error
 }
 
 type hydraIntrospectionAuthorizer struct {
@@ -88,41 +89,9 @@ func (a *hydraIntrospectionAuthorizer) Authorize(ctx context.Context, bearerToke
 		return internalPrincipal{}, ErrInternalAuthUnauthenticated
 	}
 
-	form := url.Values{}
-	form.Set("token", trimmedToken)
-	form.Set("token_type_hint", "access_token")
-
-	request, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		a.introspectionURL,
-		strings.NewReader(form.Encode()),
-	)
+	payload, err := a.introspectToken(ctx, trimmedToken)
 	if err != nil {
-		return internalPrincipal{}, fmt.Errorf("build hydra introspection request: %w", err)
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.SetBasicAuth(a.clientID, a.clientSecret)
-
-	response, err := a.httpClient.Do(request)
-	if err != nil {
-		return internalPrincipal{}, fmt.Errorf("%w: execute hydra introspection request: %v", ErrInternalAuthUnavailable, err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
-		return internalPrincipal{}, fmt.Errorf(
-			"%w: hydra introspection endpoint returned %d: %s",
-			ErrInternalAuthUnavailable,
-			response.StatusCode,
-			strings.TrimSpace(string(body)),
-		)
-	}
-
-	var payload hydraIntrospectionResponse
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		return internalPrincipal{}, fmt.Errorf("%w: decode hydra introspection response: %v", ErrInternalAuthUnavailable, err)
+		return internalPrincipal{}, err
 	}
 
 	if !payload.Active {
@@ -136,6 +105,52 @@ func (a *hydraIntrospectionAuthorizer) Authorize(ctx context.Context, bearerToke
 	}
 
 	return internalPrincipal{ClientID: payload.ClientID}, nil
+}
+
+func (a *hydraIntrospectionAuthorizer) Check(ctx context.Context) error {
+	_, err := a.introspectToken(ctx, "phase1-readiness-probe")
+	return err
+}
+
+func (a *hydraIntrospectionAuthorizer) introspectToken(ctx context.Context, token string) (hydraIntrospectionResponse, error) {
+	form := url.Values{}
+	form.Set("token", strings.TrimSpace(token))
+	form.Set("token_type_hint", "access_token")
+
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		a.introspectionURL,
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		return hydraIntrospectionResponse{}, fmt.Errorf("build hydra introspection request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.SetBasicAuth(a.clientID, a.clientSecret)
+
+	response, err := a.httpClient.Do(request)
+	if err != nil {
+		return hydraIntrospectionResponse{}, fmt.Errorf("%w: execute hydra introspection request: %v", ErrInternalAuthUnavailable, err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
+		return hydraIntrospectionResponse{}, fmt.Errorf(
+			"%w: hydra introspection endpoint returned %d: %s",
+			ErrInternalAuthUnavailable,
+			response.StatusCode,
+			strings.TrimSpace(string(body)),
+		)
+	}
+
+	var payload hydraIntrospectionResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return hydraIntrospectionResponse{}, fmt.Errorf("%w: decode hydra introspection response: %v", ErrInternalAuthUnavailable, err)
+	}
+
+	return payload, nil
 }
 
 func containsScope(scopeSet string, expectedScope string) bool {

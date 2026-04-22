@@ -104,9 +104,10 @@ type credentialStatusPayload struct {
 
 func newPhase1IssuerHandler(cfg config.Config) (*phase1IssuerHandler, error) {
 	store, err := phase1.OpenStore(phase1.StoreOptions{
-		DatabaseDriver:  cfg.Phase1DatabaseDriver,
-		DatabaseURL:     cfg.Phase1DatabaseURL,
-		LegacyStatePath: cfg.Phase1StatePath,
+		RuntimeMode:           cfg.Phase1RuntimeMode,
+		DatabaseDriver:        cfg.Phase1DatabaseDriver,
+		DatabaseURL:           cfg.Phase1DatabaseURL,
+		TransitionalStatePath: cfg.Phase1StatePath,
 	})
 	if err != nil {
 		return nil, err
@@ -123,6 +124,14 @@ func newPhase1IssuerHandlerWithStore(store *phase1.RuntimeStore) *phase1IssuerHa
 		credentials:     store,
 		audits:          store,
 	}
+}
+
+func (h *phase1IssuerHandler) readiness(ctx context.Context) error {
+	return h.store.CheckReadiness(ctx, true)
+}
+
+func (h *phase1IssuerHandler) runtimeMode() string {
+	return h.store.RuntimeMode()
 }
 
 func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Request) {

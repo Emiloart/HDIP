@@ -20,7 +20,12 @@ func NewMux(logger *slog.Logger, cfg config.Config) (http.Handler, error) {
 func newMuxWithPhase1Handler(logger *slog.Logger, cfg config.Config, phase1Handler *phase1TrustHandler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", httpx.HealthHandler(cfg.ServiceName, cfg.BuildVersion))
-	mux.Handle("/readyz", httpx.ReadyHandler(cfg.ServiceName, cfg.BuildVersion))
+	mux.Handle("/readyz", httpx.ReadyHandlerWithCheck(
+		cfg.ServiceName,
+		cfg.BuildVersion,
+		phase1Handler.runtimeMode(),
+		phase1Handler.readiness,
+	))
 	mux.HandleFunc("GET /internal/v1/phase1/issuers/{issuerId}/trust", phase1Handler.getIssuerTrust)
 
 	return httpx.Chain(

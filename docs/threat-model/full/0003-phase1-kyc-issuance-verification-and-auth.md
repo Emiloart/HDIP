@@ -7,7 +7,7 @@
 ## Change summary
 
 This threat model covers the Phase 1 transition from a read-only stub issuer/verifier flow to a real reusable KYC credential and verifier API.
-The Phase 1 boundary now adds authenticated issuer writes, authenticated verifier writes, Cockroach-compatible relational persistence for credential and verification state, append-only audit records, issuer-authenticated credential status mutation, reservation-state idempotency for write paths, trust-registry-owned runtime reads through an explicit verifier trust-read adapter, trust-registry-owned runtime trust bootstrap, Hydra client-credentials plus introspection for internal trust runtime identity, and an explicit shared `phase1sql` migration/bootstrap CLI with versioned SQL assets on the primary SQL path.
+The Phase 1 boundary now adds authenticated issuer writes, authenticated verifier writes, Cockroach-compatible relational persistence for credential and verification state, append-only audit records, issuer-authenticated credential status mutation, reservation-state idempotency for write paths, trust-registry-owned runtime reads through an explicit verifier trust-read adapter, trust-registry-owned runtime trust bootstrap, Hydra client-credentials plus introspection for internal trust runtime identity, an explicit shared `phase1sql` migration/bootstrap CLI with versioned SQL assets on the primary SQL path, SQL-primary readiness checks, and an explicit `transitional-json` compatibility mode that is no longer the implicit default.
 
 ## Assets
 
@@ -75,10 +75,13 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 ## Failure modes
 
 - Hydra introspection outage or unreachable dependency causes `trust-registry` internal runtime trust reads to fail closed
+- Hydra client-credentials token acquisition outage or unreachable dependency causes verifier trust-runtime readiness or runtime trust reads to fail closed
 - introspection returning an inactive token causes `trust-registry` to reject the runtime trust read
 - introspection returning the wrong service client identity causes `trust-registry` to reject the runtime trust read
 - missing scope `trust.runtime.read` causes `trust-registry` to reject the runtime trust read
 - primary SQL schema not migrated causes the primary SQL path to fail startup or readiness rather than silently mutating schema during normal service boot
+- missing trust bootstrap on the primary SQL path causes startup or readiness to fail closed rather than presenting a healthy service with unusable governed state
+- explicit `transitional-json` mode remains available only when operators opt into it intentionally; SQL-primary failures do not silently fall back to JSON state
 
 ## Privacy harms
 
@@ -104,7 +107,10 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - make trust-registry the only service that bootstraps or mutates runtime issuer trust state for deterministic Phase 1
 - replace the transitional static trust bearer token with Hydra client-credentials access tokens for verifier runtime trust reads
 - require trust-registry to validate runtime trust-read access tokens through Hydra introspection and fail closed on inactive tokens, wrong client identity, or missing scope
+- require verifier runtime readiness to fail closed when Hydra client-credentials token acquisition is unavailable
 - move the primary SQL path to an explicit versioned `phase1sql` migration and trust-bootstrap lifecycle instead of relying on startup schema mutation as the primary control point
+- make SQL-primary the default runtime mode and require explicit `transitional-json` opt-in for compatibility-only fallback behavior
+- make service readiness surface SQL schema, SQL trust-bootstrap, and Hydra trust-runtime dependency failures rather than reporting healthy status while governed Phase 1 dependencies are unusable
 - reserve caller-bound idempotency keys before write-side effects so overlapping same-key writes fail closed rather than silently duplicating state
 - make issuer-authenticated status transitions update persisted credential state before later issuer or verifier reads
 - return verifier decision `deny` for suspended or otherwise non-active issuers in deterministic Phase 1
@@ -119,9 +125,9 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - synchronous verifier evaluation can still be abused for denial-of-service without future rate or risk controls
 - trust-registry remains an HDIP-controlled dependency rather than a federated trust network in Phase 1
 - Hydra introspection introduces a new internal dependency whose availability and latency affect trust-runtime-read success
-- transitional JSON state fallback still exists for compatibility and tests, so local misuse of fallback configuration could bypass the primary relational path
+- explicit `transitional-json` compatibility mode still exists for tests and compatibility workflows, so local misuse of that opt-in path can still bypass the primary relational path until fallback removal is governed and completed
 - if implementation cuts corners on idempotency conflict handling or audit immutability, replay and repudiation risk will remain elevated
-- operational mis-ordering of `phase1sql migrate up` and `phase1sql bootstrap trust` can still block startup until deployment automation and fallback retirement are tightened
+- operational mis-ordering of `phase1sql migrate up` and `phase1sql bootstrap trust` can still block startup until deployment sequencing and final fallback retirement are tightened
 
 ## Validation impact
 
@@ -140,7 +146,10 @@ Phase 1 code must maintain:
 - tests that trust-registry-owned runtime reads determine verifier trust outcomes through the explicit trust adapter
 - tests that trust-registry bootstrap or update actions persist issuer trust state on the primary path with bounded append-only audit records
 - tests that verifier runtime trust reads fail closed when Hydra introspection reports inactive tokens, wrong client identity, or missing scope
+- tests that verifier readiness fails closed when Hydra client-credentials token acquisition is unavailable
 - tests that the explicit `phase1sql` migration and trust bootstrap lifecycle initializes the current approved Phase 1 SQL schema before service startup
+- tests that unmigrated or unbootstrapped primary SQL state fails startup or readiness rather than silently falling back to JSON state
+- tests that `transitional-json` mode is explicit opt-in only and remains visibly non-primary in readiness behavior
 - tests that logs and audit records do not contain raw sensitive credential payloads
 
 ## Related ADRs, plans, PRs, and issues
@@ -152,4 +161,5 @@ Phase 1 code must maintain:
 - `docs/adr/0009-phase1-opaque-artifact-and-suspended-issuer-policy.md`
 - `docs/adr/0010-phase1-internal-trust-service-identity-and-sql-lifecycle.md`
 - `docs/plans/archive/0013-phase1-hydra-internal-trust-auth-and-phase1sql-lifecycle.md`
-- `docs/plans/active/0014-phase1-sql-primary-hardening-and-fallback-retirement.md`
+- `docs/plans/archive/0014-phase1-sql-primary-hardening-and-fallback-retirement.md`
+- `docs/plans/active/0015-phase1-final-fallback-removal-and-sql-bootstrap-ordering.md`

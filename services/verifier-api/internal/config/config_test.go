@@ -9,6 +9,7 @@ import (
 func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("HDIP_HOST", "")
 	t.Setenv("HDIP_PORT", "")
+	t.Setenv("HDIP_PHASE1_DATABASE_URL", "postgres://phase1")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
@@ -32,8 +33,9 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 		RequestTimeout:                time.Second,
 		ReadHeaderTimeout:             time.Second,
 		ShutdownTimeout:               time.Second,
+		Phase1RuntimeMode:             "sql-primary",
 		Phase1DatabaseDriver:          "pgx",
-		Phase1StatePath:               "phase1-state.json",
+		Phase1DatabaseURL:             "postgres://phase1",
 		TrustRegistryBaseURL:          "http://127.0.0.1:8083",
 		TrustRuntimeHydraTokenURL:     "http://127.0.0.1:4444/oauth2/token",
 		TrustRuntimeHydraClientID:     "verifier-api",
@@ -47,9 +49,12 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 	}
 }
 
-func TestLoadUsesLegacyRuntimePathEnvFallback(t *testing.T) {
+func TestLoadUsesTransitionalStatePathEnvFallback(t *testing.T) {
+	t.Setenv("HDIP_PHASE1_RUNTIME_MODE", "transitional-json")
+	t.Setenv("HDIP_PHASE1_TRANSITIONAL_STATE_PATH", "")
 	t.Setenv("HDIP_PHASE1_STATE_PATH", "")
 	t.Setenv("HDIP_PHASE1_RUNTIME_PATH", "legacy-phase1-state.json")
+	t.Setenv("HDIP_PHASE1_DATABASE_URL", "")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
@@ -89,6 +94,7 @@ func TestLoadReadsTrustRegistryAndDatabaseSettings(t *testing.T) {
 
 func TestLoadRejectsMalformedPortEnv(t *testing.T) {
 	t.Setenv("HDIP_PORT", "not-a-port")
+	t.Setenv("HDIP_PHASE1_DATABASE_URL", "postgres://phase1")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
@@ -106,6 +112,7 @@ func TestLoadRejectsMalformedPortEnv(t *testing.T) {
 func TestLoadRejectsMalformedDurationEnv(t *testing.T) {
 	t.Setenv("HDIP_PORT", "")
 	t.Setenv("HDIP_REQUEST_TIMEOUT", "forever-ish")
+	t.Setenv("HDIP_PHASE1_DATABASE_URL", "postgres://phase1")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
@@ -121,6 +128,7 @@ func TestLoadRejectsMalformedDurationEnv(t *testing.T) {
 }
 
 func TestLoadRejectsMissingTrustRuntimeHydraTokenConfig(t *testing.T) {
+	t.Setenv("HDIP_PHASE1_DATABASE_URL", "postgres://phase1")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "")
 	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "")
@@ -132,5 +140,33 @@ func TestLoadRejectsMissingTrustRuntimeHydraTokenConfig(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "trust runtime hydra token url") {
 		t.Fatalf("expected hydra token url error, got %v", err)
+	}
+}
+
+func TestValidateRejectsSQLPrimaryWithoutDatabaseURL(t *testing.T) {
+	cfg := Config{
+		ServiceName:                   serviceName,
+		Host:                          "127.0.0.1",
+		Port:                          8082,
+		LogLevel:                      "INFO",
+		RequestTimeout:                time.Second,
+		ReadHeaderTimeout:             time.Second,
+		ShutdownTimeout:               time.Second,
+		Phase1RuntimeMode:             "sql-primary",
+		TrustRegistryBaseURL:          "http://127.0.0.1:8083",
+		TrustRuntimeHydraTokenURL:     "http://127.0.0.1:4444/oauth2/token",
+		TrustRuntimeHydraClientID:     "verifier-api",
+		TrustRuntimeHydraClientSecret: "trust-runtime-test-secret",
+		TrustRuntimeHydraScope:        "trust.runtime.read",
+		BuildVersion:                  "dev",
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected sql-primary validation error")
+	}
+
+	if !strings.Contains(err.Error(), "HDIP_PHASE1_DATABASE_URL") {
+		t.Fatalf("expected database url validation error, got %v", err)
 	}
 }

@@ -94,7 +94,24 @@ func TestTrustReadClientFailsWhenTokenAcquisitionFails(t *testing.T) {
 	}
 
 	_, err = client.GetIssuerTrustRecord(context.Background(), "did:web:issuer.hdip.dev")
-	if err == nil || !strings.Contains(err.Error(), "acquire trust runtime access token") {
+	if !errors.Is(err, ErrTrustRuntimeUnavailable) || !strings.Contains(err.Error(), "acquire trust runtime access token") {
 		t.Fatalf("expected token acquisition error, got %v", err)
+	}
+}
+
+func TestTrustReadClientClassifiesTrustRegistryAvailabilityFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "trust-registry unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client, err := NewTrustReadClient(server.URL, staticTokenSource("trust-runtime-test-token"), server.Client())
+	if err != nil {
+		t.Fatalf("new trust client: %v", err)
+	}
+
+	_, err = client.GetIssuerTrustRecord(context.Background(), "did:web:issuer.hdip.dev")
+	if !errors.Is(err, ErrTrustRuntimeUnavailable) {
+		t.Fatalf("expected ErrTrustRuntimeUnavailable, got %v", err)
 	}
 }

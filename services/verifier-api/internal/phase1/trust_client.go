@@ -13,6 +13,7 @@ import (
 )
 
 var ErrTrustRuntimeUnauthorized = errors.New("trust runtime request unauthorized")
+var ErrTrustRuntimeUnavailable = errors.New("trust runtime request unavailable")
 
 type AccessTokenSource interface {
 	Token(ctx context.Context) (string, error)
@@ -58,7 +59,7 @@ func NewTrustReadClient(baseURL string, tokenSource AccessTokenSource, httpClien
 func (c *TrustReadClient) GetIssuerTrustRecord(ctx context.Context, issuerID string) (IssuerTrustRecord, error) {
 	bearerToken, err := c.tokenSource.Token(ctx)
 	if err != nil {
-		return IssuerTrustRecord{}, fmt.Errorf("acquire trust runtime access token: %w", err)
+		return IssuerTrustRecord{}, fmt.Errorf("%w: acquire trust runtime access token: %v", ErrTrustRuntimeUnavailable, err)
 	}
 
 	request, err := http.NewRequestWithContext(
@@ -74,7 +75,7 @@ func (c *TrustReadClient) GetIssuerTrustRecord(ctx context.Context, issuerID str
 
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return IssuerTrustRecord{}, fmt.Errorf("execute trust registry request: %w", err)
+		return IssuerTrustRecord{}, fmt.Errorf("%w: execute trust registry request: %v", ErrTrustRuntimeUnavailable, err)
 	}
 	defer response.Body.Close()
 
@@ -86,7 +87,7 @@ func (c *TrustReadClient) GetIssuerTrustRecord(ctx context.Context, issuerID str
 		return IssuerTrustRecord{}, ErrTrustRuntimeUnauthorized
 	default:
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
-		return IssuerTrustRecord{}, fmt.Errorf("trust registry returned %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+		return IssuerTrustRecord{}, fmt.Errorf("%w: trust registry returned %d: %s", ErrTrustRuntimeUnavailable, response.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var payload trustSnapshotPayload

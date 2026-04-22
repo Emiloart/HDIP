@@ -20,6 +20,7 @@ type Config struct {
 	RequestTimeout       time.Duration
 	ReadHeaderTimeout    time.Duration
 	ShutdownTimeout      time.Duration
+	Phase1RuntimeMode    string
 	Phase1DatabaseDriver string
 	Phase1DatabaseURL    string
 	Phase1StatePath      string
@@ -55,6 +56,7 @@ func Load() (Config, error) {
 		RequestTimeout:       requestTimeout,
 		ReadHeaderTimeout:    readHeaderTimeout,
 		ShutdownTimeout:      shutdownTimeout,
+		Phase1RuntimeMode:    getenv("HDIP_PHASE1_RUNTIME_MODE", "sql-primary"),
 		Phase1DatabaseDriver: getenv("HDIP_PHASE1_DATABASE_DRIVER", "pgx"),
 		Phase1DatabaseURL:    getenv("HDIP_PHASE1_DATABASE_URL", ""),
 		Phase1StatePath:      phase1StatePath(),
@@ -80,9 +82,23 @@ func (c Config) Validate() error {
 		return errors.New("read header timeout must be positive")
 	case c.ShutdownTimeout <= 0:
 		return errors.New("shutdown timeout must be positive")
-	case strings.TrimSpace(c.Phase1DatabaseURL) == "" && strings.TrimSpace(c.Phase1StatePath) == "":
-		return errors.New("phase1 database url or transitional state path must be configured")
 	default:
+		switch strings.TrimSpace(c.Phase1RuntimeMode) {
+		case "", "sql-primary":
+			if strings.TrimSpace(c.Phase1DatabaseURL) == "" {
+				return errors.New("phase1 sql-primary runtime requires HDIP_PHASE1_DATABASE_URL")
+			}
+		case "transitional-json":
+			if strings.TrimSpace(c.Phase1StatePath) == "" {
+				return errors.New("transitional-json runtime requires HDIP_PHASE1_TRANSITIONAL_STATE_PATH")
+			}
+			if strings.TrimSpace(c.Phase1DatabaseURL) != "" {
+				return errors.New("transitional-json runtime must not configure HDIP_PHASE1_DATABASE_URL")
+			}
+		default:
+			return fmt.Errorf("phase1 runtime mode must be sql-primary or transitional-json, got %q", c.Phase1RuntimeMode)
+		}
+
 		return nil
 	}
 }
@@ -128,6 +144,9 @@ func getenvDuration(key string, fallback time.Duration) (time.Duration, error) {
 }
 
 func phase1StatePath() string {
+	if value := strings.TrimSpace(os.Getenv("HDIP_PHASE1_TRANSITIONAL_STATE_PATH")); value != "" {
+		return value
+	}
 	if value := strings.TrimSpace(os.Getenv("HDIP_PHASE1_STATE_PATH")); value != "" {
 		return value
 	}

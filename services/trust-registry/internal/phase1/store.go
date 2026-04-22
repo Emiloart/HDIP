@@ -3,6 +3,8 @@ package phase1
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	phase1runtime "github.com/Emiloart/HDIP/services/internal/phase1runtime"
@@ -43,27 +45,50 @@ type AuditRecord struct {
 }
 
 type StoreOptions struct {
-	DatabaseDriver  string
-	DatabaseURL     string
-	LegacyStatePath string
+	RuntimeMode           string
+	DatabaseDriver        string
+	DatabaseURL           string
+	TransitionalStatePath string
 }
 
 type RuntimeStore struct {
+	mode   string
 	legacy *phase1runtime.Store
 	sql    *phase1sql.Store
 }
 
+const (
+	RuntimeModeSQLPrimary       = "sql-primary"
+	RuntimeModeTransitionalJSON = "transitional-json"
+)
+
 func OpenStore(options StoreOptions) (*RuntimeStore, error) {
-	if options.DatabaseURL != "" {
+	switch normalizeRuntimeMode(options.RuntimeMode) {
+	case RuntimeModeSQLPrimary:
+		if strings.TrimSpace(options.DatabaseURL) == "" {
+			return nil, fmt.Errorf("phase1 sql-primary runtime requires HDIP_PHASE1_DATABASE_URL")
+		}
+
 		store, err := phase1sql.Open(options.DatabaseDriver, options.DatabaseURL)
 		if err != nil {
 			return nil, err
 		}
 
-		return &RuntimeStore{sql: store}, nil
-	}
+		if err := store.RequireTrustBootstrap(context.Background()); err != nil {
+			_ = store.Close()
+			return nil, err
+		}
 
-	return OpenRuntimeStore(options.LegacyStatePath)
+		return &RuntimeStore{mode: RuntimeModeSQLPrimary, sql: store}, nil
+	case RuntimeModeTransitionalJSON:
+		if strings.TrimSpace(options.TransitionalStatePath) == "" {
+			return nil, fmt.Errorf("transitional-json runtime requires HDIP_PHASE1_TRANSITIONAL_STATE_PATH")
+		}
+
+		return OpenRuntimeStore(options.TransitionalStatePath)
+	default:
+		return nil, fmt.Errorf("unsupported phase1 runtime mode %q", options.RuntimeMode)
+	}
 }
 
 func OpenRuntimeStore(path string) (*RuntimeStore, error) {
@@ -72,15 +97,42 @@ func OpenRuntimeStore(path string) (*RuntimeStore, error) {
 		return nil, err
 	}
 
-	return &RuntimeStore{legacy: store}, nil
+	return &RuntimeStore{mode: RuntimeModeTransitionalJSON, legacy: store}, nil
 }
 
 func NewRuntimeStore(store *phase1runtime.Store) *RuntimeStore {
-	return &RuntimeStore{legacy: store}
+	return &RuntimeStore{mode: RuntimeModeTransitionalJSON, legacy: store}
 }
 
 func NewSQLRuntimeStore(store *phase1sql.Store) *RuntimeStore {
-	return &RuntimeStore{sql: store}
+	return &RuntimeStore{mode: RuntimeModeSQLPrimary, sql: store}
+}
+
+func (s *RuntimeStore) RuntimeMode() string {
+	if s == nil || strings.TrimSpace(s.mode) == "" {
+		return RuntimeModeSQLPrimary
+	}
+
+	return s.mode
+}
+
+func (s *RuntimeStore) CheckReadiness(ctx context.Context, requireTrustBootstrap bool) error {
+	if s == nil {
+		return fmt.Errorf("phase1 runtime store is required")
+	}
+
+	if s.sql != nil {
+		if err := s.sql.RequireSchema(ctx); err != nil {
+			return err
+		}
+		if requireTrustBootstrap {
+			if err := s.sql.RequireTrustBootstrap(ctx); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *RuntimeStore) Close() error {
@@ -194,6 +246,15 @@ func translateSQLError(err error) error {
 	}
 
 	return err
+}
+
+func normalizeRuntimeMode(mode string) string {
+	normalizedMode := strings.TrimSpace(mode)
+	if normalizedMode == "" {
+		return RuntimeModeSQLPrimary
+	}
+
+	return normalizedMode
 }
 
 func issuerRecordFromRuntime(record phase1runtime.IssuerRecord) IssuerRecord {

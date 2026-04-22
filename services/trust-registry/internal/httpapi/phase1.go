@@ -27,15 +27,16 @@ type issuerTrustPayload struct {
 
 func newPhase1TrustHandler(cfg config.Config) (*phase1TrustHandler, error) {
 	store, err := phase1.OpenStore(phase1.StoreOptions{
-		DatabaseDriver:  cfg.Phase1DatabaseDriver,
-		DatabaseURL:     cfg.Phase1DatabaseURL,
-		LegacyStatePath: cfg.Phase1StatePath,
+		RuntimeMode:           cfg.Phase1RuntimeMode,
+		DatabaseDriver:        cfg.Phase1DatabaseDriver,
+		DatabaseURL:           cfg.Phase1DatabaseURL,
+		TransitionalStatePath: cfg.Phase1StatePath,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if strings.TrimSpace(cfg.Phase1DatabaseURL) == "" {
+	if strings.TrimSpace(cfg.Phase1RuntimeMode) == phase1.RuntimeModeTransitionalJSON {
 		if _, err := phase1.ApplyBootstrapFile(context.Background(), store, cfg.TrustBootstrapPath, time.Now().UTC()); err != nil {
 			_ = store.Close()
 			return nil, err
@@ -74,6 +75,23 @@ func newPhase1TrustHandlerWithStoreAndAuthorizer(store *phase1.RuntimeStore, aut
 		store:      store,
 		authorizer: authorizer,
 	}
+}
+
+func (h *phase1TrustHandler) readiness(ctx context.Context) error {
+	if err := h.store.CheckReadiness(ctx, true); err != nil {
+		return err
+	}
+	if h.authorizer != nil {
+		if err := h.authorizer.Check(ctx); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (h *phase1TrustHandler) runtimeMode() string {
+	return h.store.RuntimeMode()
 }
 
 func (h *phase1TrustHandler) getIssuerTrust(w http.ResponseWriter, r *http.Request) {
@@ -139,4 +157,8 @@ func (a staticInternalAuthorizer) Authorize(context.Context, string) (internalPr
 	}
 
 	return a.principal, nil
+}
+
+func (a staticInternalAuthorizer) Check(context.Context) error {
+	return a.err
 }

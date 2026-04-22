@@ -3,6 +3,7 @@ package phase1
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -118,5 +119,28 @@ func TestHydraClientCredentialsTokenSourceAcceptsParsedURL(t *testing.T) {
 
 	if _, err := NewHydraClientCredentialsTokenSource(parsedURL.String(), "verifier-api", "secret", "trust.runtime.read", server.Client()); err != nil {
 		t.Fatalf("expected parsed url to be accepted, got %v", err)
+	}
+}
+
+func TestHydraClientCredentialsTokenSourceCheckFailsClosed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "hydra unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	tokenSource, err := NewHydraClientCredentialsTokenSource(
+		server.URL,
+		"verifier-api",
+		"secret",
+		"trust.runtime.read",
+		server.Client(),
+	)
+	if err != nil {
+		t.Fatalf("new token source: %v", err)
+	}
+
+	err = tokenSource.Check(context.Background())
+	if !errors.Is(err, ErrHydraTokenUnavailable) {
+		t.Fatalf("expected ErrHydraTokenUnavailable, got %v", err)
 	}
 }

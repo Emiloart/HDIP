@@ -43,6 +43,32 @@ func TestHealthHandler(t *testing.T) {
 	}
 }
 
+func TestReadyHandlerReportsTransitionalRuntimeMode(t *testing.T) {
+	handler := newTestIssuerHandler(t)
+
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+
+	if runtimeMode := recorder.Header().Get("X-HDIP-Phase1-Runtime-Mode"); runtimeMode != phase1.RuntimeModeTransitionalJSON {
+		t.Fatalf("expected transitional runtime mode header, got %q", runtimeMode)
+	}
+
+	var response httpx.HealthResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Status != "ready" {
+		t.Fatalf("unexpected readiness response: %+v", response)
+	}
+}
+
 func TestIssuerProfileHandler(t *testing.T) {
 	handler := newTestIssuerHandler(t)
 
@@ -743,6 +769,7 @@ func testIssuerConfig(t *testing.T) config.Config {
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
+		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
 		Phase1StatePath:   filepath.Join(t.TempDir(), "issuer-phase1-state.json"),
 		BuildVersion:      "test",
 	}

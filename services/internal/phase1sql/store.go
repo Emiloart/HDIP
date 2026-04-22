@@ -13,6 +13,7 @@ import (
 )
 
 var ErrRecordNotFound = errors.New("phase1 sql record not found")
+var ErrDependencyUnavailable = errors.New("phase1 sql dependency unavailable")
 
 type Store struct {
 	db      *sql.DB
@@ -55,7 +56,7 @@ func Connect(driverName string, dsn string) (*Store, error) {
 
 	if err := store.db.Ping(); err != nil {
 		_ = store.db.Close()
-		return nil, fmt.Errorf("ping phase1 sql store: %w", err)
+		return nil, fmt.Errorf("%w: ping phase1 sql store: %v", ErrDependencyUnavailable, err)
 	}
 
 	return store, nil

@@ -2,6 +2,10 @@ package phase1sql
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -274,6 +278,9 @@ func TestExplicitMigrationAndTrustBootstrapLifecycle(t *testing.T) {
 	if err := store.RequireSchema(context.Background()); err != nil {
 		t.Fatalf("require schema after migrate: %v", err)
 	}
+	if err := store.RequireTrustBootstrap(context.Background()); err != nil {
+		t.Fatalf("require trust bootstrap after bootstrap apply: %v", err)
+	}
 
 	record, err := store.GetIssuerRecord(context.Background(), "did:web:issuer.lifecycle.hdip.dev")
 	if err != nil {
@@ -289,6 +296,63 @@ func TestExplicitMigrationAndTrustBootstrapLifecycle(t *testing.T) {
 	}
 	if len(audits) != 1 || audits[0].Action != TrustBootstrapAction {
 		t.Fatalf("unexpected audit records: %+v", audits)
+	}
+}
+
+func TestOpenFailsClosedOnUnmigratedPrimarySchema(t *testing.T) {
+	dsn := os.Getenv("HDIP_PHASE1_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("HDIP_PHASE1_TEST_DATABASE_URL is not set")
+	}
+
+	schemaDSN := isolatedSchemaDSN(t, dsn)
+
+	_, err := Open("pgx", schemaDSN)
+	if !errors.Is(err, ErrSchemaNotInitialized) {
+		t.Fatalf("expected ErrSchemaNotInitialized, got %v", err)
+	}
+}
+
+func TestRequireTrustBootstrapFailsUntilApplied(t *testing.T) {
+	dsn := os.Getenv("HDIP_PHASE1_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("HDIP_PHASE1_TEST_DATABASE_URL is not set")
+	}
+
+	schemaDSN := isolatedSchemaDSN(t, dsn)
+	if err := MigrateUp(context.Background(), "pgx", schemaDSN); err != nil {
+		t.Fatalf("migrate isolated schema: %v", err)
+	}
+
+	store, err := Open("pgx", schemaDSN)
+	if err != nil {
+		t.Fatalf("open isolated schema store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+
+	err = store.RequireTrustBootstrap(context.Background())
+	if !errors.Is(err, ErrTrustBootstrapNotCompleted) {
+		t.Fatalf("expected ErrTrustBootstrapNotCompleted, got %v", err)
+	}
+
+	if _, err := ApplyTrustBootstrapDocument(context.Background(), store, "phase1sql-bootstrap.json", TrustBootstrapDocument{
+		Issuers: []TrustBootstrapIssuerRecord{
+			{
+				IssuerID:                  "did:web:issuer.bootstrap.hdip.dev",
+				DisplayName:               "HDIP Passport Issuer",
+				TrustState:                "active",
+				AllowedTemplateIDs:        []string{"hdip-passport-basic"},
+				VerificationKeyReferences: []string{"key:issuer.hdip.dev:2026-04"},
+			},
+		},
+	}, time.Date(2026, time.April, 22, 15, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("apply trust bootstrap: %v", err)
+	}
+
+	if err := store.RequireTrustBootstrap(context.Background()); err != nil {
+		t.Fatalf("require trust bootstrap after apply: %v", err)
 	}
 }
 
@@ -328,4 +392,32 @@ func resetTestTables(t *testing.T, store *Store) {
 			t.Fatalf("reset test tables with %q: %v", statement, err)
 		}
 	}
+}
+
+func isolatedSchemaDSN(t *testing.T, baseDSN string) string {
+	t.Helper()
+
+	parsedDSN, err := url.Parse(baseDSN)
+	if err != nil {
+		t.Fatalf("parse phase1 test dsn: %v", err)
+	}
+
+	schemaName := fmt.Sprintf("hdip_phase1_%d", time.Now().UTC().UnixNano())
+	db, err := sql.Open("pgx", baseDSN)
+	if err != nil {
+		t.Fatalf("open admin db: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName))
+		_ = db.Close()
+	})
+
+	if _, err := db.ExecContext(context.Background(), fmt.Sprintf("CREATE SCHEMA %s", schemaName)); err != nil {
+		t.Fatalf("create isolated schema: %v", err)
+	}
+
+	query := parsedDSN.Query()
+	query.Set("search_path", schemaName)
+	parsedDSN.RawQuery = query.Encode()
+	return parsedDSN.String()
 }

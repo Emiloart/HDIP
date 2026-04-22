@@ -3,6 +3,7 @@ package phase1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"time"
 )
+
+var ErrHydraTokenUnavailable = errors.New("trust runtime hydra token unavailable")
 
 type HydraClientCredentialsTokenSource struct {
 	tokenURL     string
@@ -111,6 +114,14 @@ func (s *HydraClientCredentialsTokenSource) Token(ctx context.Context) (string, 
 
 	s.cacheAccessToken(payload.AccessToken, payload.ExpiresIn)
 	return strings.TrimSpace(payload.AccessToken), nil
+}
+
+func (s *HydraClientCredentialsTokenSource) Check(ctx context.Context) error {
+	if _, err := s.Token(ctx); err != nil {
+		return fmt.Errorf("%w: %v", ErrHydraTokenUnavailable, err)
+	}
+
+	return nil
 }
 
 func (s *HydraClientCredentialsTokenSource) cachedAccessToken() string {

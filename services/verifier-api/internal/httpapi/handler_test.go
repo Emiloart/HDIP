@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,14 @@ import (
 
 const verifierTrustRuntimeToken = "hydra-trust-runtime-access-token"
 
+type staticReadinessProbe struct {
+	err error
+}
+
+func (p staticReadinessProbe) Check(context.Context) error {
+	return p.err
+}
+
 func TestHealthHandler(t *testing.T) {
 	handler := newTestVerifierHandler(t)
 
@@ -42,6 +51,54 @@ func TestHealthHandler(t *testing.T) {
 
 	if response.Service != "verifier-api" || response.Status != "ok" {
 		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestReadyHandlerReportsTransitionalRuntimeMode(t *testing.T) {
+	handler := newTestVerifierHandlerWithStore(t, newVerifierStoreWithDefaults(t))
+
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+
+	if runtimeMode := recorder.Header().Get("X-HDIP-Phase1-Runtime-Mode"); runtimeMode != phase1.RuntimeModeTransitionalJSON {
+		t.Fatalf("expected transitional runtime mode header, got %q", runtimeMode)
+	}
+}
+
+func TestReadyHandlerFailsClosedWhenHydraTokenUnavailable(t *testing.T) {
+	store := newVerifierStoreWithDefaults(t)
+	handler := newMuxWithPhase1Handler(
+		slog.Default(),
+		testVerifierConfig(t),
+		newPhase1VerifierHandlerWithStoreAndTrustAndReadiness(
+			store,
+			store,
+			staticReadinessProbe{err: fmt.Errorf("%w: token endpoint unavailable", phase1.ErrHydraTokenUnavailable)},
+		),
+	)
+
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", recorder.Code)
+	}
+
+	var response httpx.ErrorEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Error.Code != "not_ready" || !strings.Contains(response.Error.Message, "trust runtime hydra token unavailable") {
+		t.Fatalf("unexpected readiness error response: %+v", response)
 	}
 }
 
@@ -1013,6 +1070,7 @@ func testVerifierConfig(t *testing.T) config.Config {
 		RequestTimeout:                time.Second,
 		ReadHeaderTimeout:             time.Second,
 		ShutdownTimeout:               time.Second,
+		Phase1RuntimeMode:             phase1.RuntimeModeTransitionalJSON,
 		Phase1StatePath:               filepath.Join(t.TempDir(), "verifier-phase1-state.json"),
 		TrustRegistryBaseURL:          "http://127.0.0.1:19083",
 		TrustRuntimeHydraTokenURL:     "http://127.0.0.1:4444/oauth2/token",

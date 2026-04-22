@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 type ErrorDetail struct {
@@ -56,7 +57,26 @@ func HealthHandler(service string, version string) http.Handler {
 }
 
 func ReadyHandler(service string, version string) http.Handler {
+	return ReadyHandlerWithCheck(service, version, "", nil)
+}
+
+func ReadyHandlerWithCheck(
+	service string,
+	version string,
+	runtimeMode string,
+	check func(context.Context) error,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if normalizedRuntimeMode := strings.TrimSpace(runtimeMode); normalizedRuntimeMode != "" {
+			w.Header().Set("X-HDIP-Phase1-Runtime-Mode", normalizedRuntimeMode)
+		}
+		if check != nil {
+			if err := check(r.Context()); err != nil {
+				WriteError(w, r.Context(), http.StatusServiceUnavailable, "not_ready", err.Error())
+				return
+			}
+		}
+
 		WriteJSON(w, http.StatusOK, HealthResponse{
 			Status:  "ready",
 			Service: service,

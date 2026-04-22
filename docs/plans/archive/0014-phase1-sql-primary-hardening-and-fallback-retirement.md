@@ -1,18 +1,18 @@
 # 0014 Phase 1 SQL Primary Hardening And Fallback Retirement
 
-- Status: active
+- Status: completed
 - Date: 2026-04-22
 - Owners: repository maintainer
 
 ## Objective
 
-Retire the remaining transitional JSON runtime fallback from the primary Phase 1 path and harden the operational lifecycle around Hydra-backed trust reads and the explicit `phase1sql` migration/bootstrap commands, without changing the public Phase 1 issuer or verifier contracts.
+Constrain the remaining transitional JSON runtime fallback out of the governed primary Phase 1 path and harden the operational lifecycle around Hydra-backed trust reads and the explicit `phase1sql` migration/bootstrap commands, without changing the public Phase 1 issuer or verifier contracts.
 
 ## Scope
 
 - make the explicit `phase1sql` lifecycle the operationally primary path in local and deployment documentation
 - tighten startup, readiness, and deployment expectations around migrated and bootstrapped SQL state
-- reduce or retire JSON fallback use in service runtime paths where the primary SQL path is already governed and stable
+- make SQL-primary the default governed runtime path and constrain JSON fallback to an explicit transitional mode only
 - harden the Hydra trust-runtime path with narrow operational safeguards such as clearer config errors, timeout handling, and failure visibility
 - add validation and integration coverage for migrated SQL startup and fallback-retirement behavior
 
@@ -44,7 +44,7 @@ Retire the remaining transitional JSON runtime fallback from the primary Phase 1
 
 ## Risks
 
-- removing fallback paths too aggressively can break local workflows that have not adopted the explicit SQL lifecycle
+- constraining fallback paths too aggressively can break local workflows that have not adopted the explicit SQL lifecycle
 - Hydra dependency outages still fail trust runtime reads closed and can become more visible as fallback paths shrink
 - operator mis-ordering of migration and trust bootstrap can still block startup until deployment automation hardens
 
@@ -57,10 +57,10 @@ Retire the remaining transitional JSON runtime fallback from the primary Phase 1
 
 ## Rollback or containment notes
 
-If fallback retirement or SQL-primary hardening is incorrect, restore the transitional compatibility path explicitly and document the rollback boundary.
+If fallback constraint or SQL-primary hardening is incorrect, restore the transitional compatibility path explicitly and document the rollback boundary.
 Do not leave services in a mixed state where startup assumptions differ between issuer, verifier, and trust-registry.
 
 ## Open questions
 
-- when the transitional JSON fallback can be removed entirely rather than remaining available for compatibility and tests
-- what the narrowest acceptable operational hardening is for Hydra outages before broader resilience work is governed
+- when the now-explicit transitional JSON mode can be removed entirely rather than remaining available for compatibility and tests
+- how much deployment sequencing automation should exist around `phase1sql migrate up` and `phase1sql bootstrap trust` before broader rollout work is governed

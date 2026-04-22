@@ -3,9 +3,13 @@ package phase1sql
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+var ErrSchemaNotInitialized = errors.New("phase1 sql schema not initialized")
+var ErrTrustBootstrapNotCompleted = errors.New("phase1 trust bootstrap not completed")
 
 //go:embed migrations/*.sql
 var migrationAssetsFS embed.FS
@@ -79,9 +83,45 @@ func (s *Store) RequireSchema(ctx context.Context) error {
 	}
 
 	return fmt.Errorf(
-		"phase1 sql schema is not initialized: missing %s; run phase1sql migrate up",
+		"%w: missing %s; run phase1sql migrate up",
+		ErrSchemaNotInitialized,
 		strings.Join(missing, ", "),
 	)
+}
+
+func (s *Store) RequireTrustBootstrap(ctx context.Context) error {
+	if s == nil {
+		return fmt.Errorf("phase1 sql store is required")
+	}
+
+	recordCount, err := s.IssuerRecordCount(ctx)
+	if err != nil {
+		return err
+	}
+	if recordCount > 0 {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"%w: trust_registry_issuer_records is empty; run phase1sql bootstrap trust --file <path>",
+		ErrTrustBootstrapNotCompleted,
+	)
+}
+
+func (s *Store) IssuerRecordCount(ctx context.Context) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("phase1 sql store is required")
+	}
+
+	var count int
+	if err := s.db.QueryRowContext(
+		ctx,
+		s.bind(`SELECT COUNT(*) FROM trust_registry_issuer_records`),
+	).Scan(&count); err != nil {
+		return 0, fmt.Errorf("%w: count issuer trust records: %v", ErrDependencyUnavailable, err)
+	}
+
+	return count, nil
 }
 
 func (s *Store) MissingSchemaObjects(ctx context.Context) ([]string, error) {
@@ -154,7 +194,7 @@ SELECT EXISTS (
 
 	var exists bool
 	if err := s.db.QueryRowContext(ctx, s.bind(query), args...).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check phase1 sql schema object %s %s: %w", objectType, name, err)
+		return false, fmt.Errorf("%w: check phase1 sql schema object %s %s: %v", ErrDependencyUnavailable, objectType, name, err)
 	}
 
 	return exists, nil

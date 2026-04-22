@@ -17,7 +17,7 @@ func TestHydraIntrospectionAuthorizerAcceptsAuthorizedVerifierClient(t *testing.
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("parse form: %v", err)
 		}
-		if r.Form.Get("token") != trustRegistryTestToken {
+		if token := r.Form.Get("token"); token != trustRegistryTestToken && token != "phase1-readiness-probe" {
 			t.Fatalf("unexpected token: %s", r.Form.Get("token"))
 		}
 		if r.Form.Get("token_type_hint") != "access_token" {
@@ -48,6 +48,10 @@ func TestHydraIntrospectionAuthorizerAcceptsAuthorizedVerifierClient(t *testing.
 
 	if principal.ClientID != "verifier-api" {
 		t.Fatalf("unexpected principal: %+v", principal)
+	}
+
+	if err := authorizer.Check(context.Background()); err != nil {
+		t.Fatalf("check readiness: %v", err)
 	}
 }
 
