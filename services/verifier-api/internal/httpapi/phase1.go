@@ -79,7 +79,7 @@ func newPhase1VerifierHandler(cfg config.Config) (*phase1VerifierHandler, error)
 		return nil, err
 	}
 
-	trusts, err := phase1.NewTrustReadClient(cfg.TrustRegistryBaseURL, &http.Client{
+	trusts, err := phase1.NewTrustReadClient(cfg.TrustRegistryBaseURL, cfg.TrustRegistryAuthToken, &http.Client{
 		Timeout: cfg.RequestTimeout,
 	})
 	if err != nil {

@@ -23,6 +23,8 @@ type Config struct {
 	Phase1DatabaseDriver string
 	Phase1DatabaseURL    string
 	Phase1StatePath      string
+	TrustBootstrapPath   string
+	InternalAuthToken    string
 	BuildVersion         string
 }
 
@@ -58,6 +60,8 @@ func Load() (Config, error) {
 		Phase1DatabaseDriver: getenv("HDIP_PHASE1_DATABASE_DRIVER", "pgx"),
 		Phase1DatabaseURL:    getenv("HDIP_PHASE1_DATABASE_URL", ""),
 		Phase1StatePath:      phase1StatePath(),
+		TrustBootstrapPath:   getenv("HDIP_TRUST_REGISTRY_BOOTSTRAP_PATH", ""),
+		InternalAuthToken:    getenv("HDIP_TRUST_REGISTRY_INTERNAL_AUTH_TOKEN", ""),
 		BuildVersion:         getenv("HDIP_BUILD_VERSION", "dev"),
 	}
 
@@ -82,6 +86,8 @@ func (c Config) Validate() error {
 		return errors.New("shutdown timeout must be positive")
 	case strings.TrimSpace(c.Phase1DatabaseURL) == "" && strings.TrimSpace(c.Phase1StatePath) == "":
 		return errors.New("phase1 database url or transitional state path must be configured")
+	case strings.TrimSpace(c.InternalAuthToken) == "":
+		return errors.New("trust registry internal auth token must be configured")
 	default:
 		return nil
 	}

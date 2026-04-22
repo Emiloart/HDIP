@@ -1,8 +1,12 @@
 package httpapi
 
 import (
+	"context"
+	"crypto/subtle"
 	"errors"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
 	"github.com/Emiloart/HDIP/services/trust-registry/internal/config"
@@ -10,7 +14,8 @@ import (
 )
 
 type phase1TrustHandler struct {
-	store *phase1.RuntimeStore
+	store             *phase1.RuntimeStore
+	internalAuthToken string
 }
 
 type issuerTrustPayload struct {
@@ -30,14 +35,30 @@ func newPhase1TrustHandler(cfg config.Config) (*phase1TrustHandler, error) {
 		return nil, err
 	}
 
-	return newPhase1TrustHandlerWithStore(store), nil
+	if _, err := phase1.ApplyBootstrapFile(context.Background(), store, cfg.TrustBootstrapPath, time.Now().UTC()); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+
+	return newPhase1TrustHandlerWithStoreAndToken(store, cfg.InternalAuthToken), nil
 }
 
 func newPhase1TrustHandlerWithStore(store *phase1.RuntimeStore) *phase1TrustHandler {
-	return &phase1TrustHandler{store: store}
+	return newPhase1TrustHandlerWithStoreAndToken(store, "")
+}
+
+func newPhase1TrustHandlerWithStoreAndToken(store *phase1.RuntimeStore, internalAuthToken string) *phase1TrustHandler {
+	return &phase1TrustHandler{
+		store:             store,
+		internalAuthToken: strings.TrimSpace(internalAuthToken),
+	}
 }
 
 func (h *phase1TrustHandler) getIssuerTrust(w http.ResponseWriter, r *http.Request) {
+	if !h.requireInternalAuth(w, r) {
+		return
+	}
+
 	record, err := h.store.GetIssuerRecord(r.Context(), r.PathValue("issuerId"))
 	if err != nil {
 		if errors.Is(err, phase1.ErrRecordNotFound) {
@@ -55,4 +76,17 @@ func (h *phase1TrustHandler) getIssuerTrust(w http.ResponseWriter, r *http.Reque
 		AllowedTemplateIDs:        append([]string(nil), record.AllowedTemplateIDs...),
 		VerificationKeyReferences: append([]string(nil), record.VerificationKeyReferences...),
 	})
+}
+
+func (h *phase1TrustHandler) requireInternalAuth(w http.ResponseWriter, r *http.Request) bool {
+	authorizationHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+	token := strings.TrimSpace(strings.TrimPrefix(authorizationHeader, "Bearer "))
+	if !strings.HasPrefix(authorizationHeader, "Bearer ") ||
+		token == "" ||
+		subtle.ConstantTimeCompare([]byte(token), []byte(h.internalAuthToken)) != 1 {
+		httpx.WriteError(w, r.Context(), http.StatusUnauthorized, "unauthenticated", "internal trust runtime credentials are required")
+		return false
+	}
+
+	return true
 }

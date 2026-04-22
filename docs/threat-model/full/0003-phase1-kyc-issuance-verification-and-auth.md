@@ -7,7 +7,7 @@
 ## Change summary
 
 This threat model covers the Phase 1 transition from a read-only stub issuer/verifier flow to a real reusable KYC credential and verifier API.
-The Phase 1 boundary now adds authenticated issuer writes, authenticated verifier writes, Cockroach-compatible relational persistence for credential and verification state, append-only audit records, issuer-authenticated credential status mutation, reservation-state idempotency for write paths, and trust-registry-owned runtime reads through an explicit verifier trust-read adapter.
+The Phase 1 boundary now adds authenticated issuer writes, authenticated verifier writes, Cockroach-compatible relational persistence for credential and verification state, append-only audit records, issuer-authenticated credential status mutation, reservation-state idempotency for write paths, trust-registry-owned runtime reads through an explicit verifier trust-read adapter, and trust-registry-owned runtime trust bootstrap with governed internal bearer auth on the read boundary.
 
 ## Assets
 
@@ -28,7 +28,7 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - `issuer-api` to the relational Phase 1 persistence boundary
 - `verifier-api` to the relational Phase 1 persistence boundary
 - `trust-registry` to the relational issuer-trust persistence boundary it owns for runtime reads
-- verifier trust-read client to the `trust-registry` internal runtime-read boundary
+- verifier trust-read client to the `trust-registry` internal runtime-read boundary protected by internal bearer auth
 - service edge auth-context extraction boundary
 - audit append boundary
 - typed client to backend API boundary
@@ -52,7 +52,9 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - `POST /v1/verifier/verifications`
 - verifier result reads
 - trust-registry updates to issuer trust state or verification-key references
+- trust-registry bootstrap or apply flow for deterministic Phase 1 issuer trust state
 - service-edge auth token or credential validation
+- trust-registry internal bearer-token validation for runtime trust reads
 
 ## Abuse and misuse cases
 
@@ -87,6 +89,8 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - keep verification request persistence to digests and bounded metadata rather than duplicating full credentials by default
 - make audit records append-only and reference sensitive artifacts by identifiers or digests
 - consult the trust-registry-owned runtime read boundary through an explicit verifier trust-read adapter for issuer trust state and verification-key references rather than a generic issuer-record path or seeded verifier-local placeholders
+- make trust-registry the only service that bootstraps or mutates runtime issuer trust state for deterministic Phase 1
+- require verifier-api to authenticate explicitly to trust-registry for runtime trust reads and fail closed on missing or invalid internal credentials
 - reserve caller-bound idempotency keys before write-side effects so overlapping same-key writes fail closed rather than silently duplicating state
 - make issuer-authenticated status transitions update persisted credential state before later issuer or verifier reads
 - return verifier decision `deny` for suspended or otherwise non-active issuers in deterministic Phase 1
@@ -100,7 +104,7 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - opaque Phase 1 artifacts do not provide cryptographic authenticity until a later signing model is approved
 - synchronous verifier evaluation can still be abused for denial-of-service without future rate or risk controls
 - trust-registry remains an HDIP-controlled dependency rather than a federated trust network in Phase 1
-- trust-registry runtime reads are still internal HDIP service calls without the final production auth layer
+- internal bearer auth on trust-registry runtime reads is still a narrow transitional service-to-service mechanism rather than the final production service identity model
 - transitional JSON state fallback still exists for compatibility and tests, so local misuse of fallback configuration could bypass the primary relational path
 - if implementation cuts corners on idempotency conflict handling or audit immutability, replay and repudiation risk will remain elevated
 
@@ -119,6 +123,8 @@ The first real Phase 1 code slice must add:
 - tests that issuer status mutation updates the persisted state seen by later issuer and verifier reads
 - tests that separate repository or runtime instances observe the same persisted credential, status, trust, and idempotency state
 - tests that trust-registry-owned runtime reads determine verifier trust outcomes through the explicit trust adapter
+- tests that trust-registry bootstrap or update actions persist issuer trust state on the primary path with bounded append-only audit records
+- tests that verifier runtime trust reads fail closed when internal trust credentials are missing or invalid
 - tests that logs and audit records do not contain raw sensitive credential payloads
 
 ## Related ADRs, plans, PRs, and issues
@@ -128,4 +134,4 @@ The first real Phase 1 code slice must add:
 - `docs/adr/0007-phase1-state-and-persistence-model.md`
 - `docs/adr/0008-phase1-auth-and-attribution-boundary.md`
 - `docs/adr/0009-phase1-opaque-artifact-and-suspended-issuer-policy.md`
-- `docs/plans/active/0011-phase1-production-persistence-and-trust-runtime-reads.md`
+- `docs/plans/active/0012-phase1-trust-registry-writes-bootstrap-and-internal-auth.md`

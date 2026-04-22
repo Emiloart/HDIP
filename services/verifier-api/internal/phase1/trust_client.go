@@ -3,6 +3,7 @@ package phase1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,9 +12,12 @@ import (
 	"time"
 )
 
+var ErrTrustRuntimeUnauthorized = errors.New("trust runtime request unauthorized")
+
 type TrustReadClient struct {
-	baseURL    string
-	httpClient *http.Client
+	bearerToken string
+	baseURL     string
+	httpClient  *http.Client
 }
 
 type trustSnapshotPayload struct {
@@ -23,10 +27,13 @@ type trustSnapshotPayload struct {
 	VerificationKeyReferences []string `json:"verificationKeyReferences"`
 }
 
-func NewTrustReadClient(baseURL string, httpClient *http.Client) (*TrustReadClient, error) {
+func NewTrustReadClient(baseURL string, bearerToken string, httpClient *http.Client) (*TrustReadClient, error) {
 	normalizedBaseURL := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if normalizedBaseURL == "" {
 		return nil, fmt.Errorf("trust registry base url must not be empty")
+	}
+	if strings.TrimSpace(bearerToken) == "" {
+		return nil, fmt.Errorf("trust registry internal auth token must not be empty")
 	}
 
 	if _, err := url.Parse(normalizedBaseURL); err != nil {
@@ -38,8 +45,9 @@ func NewTrustReadClient(baseURL string, httpClient *http.Client) (*TrustReadClie
 	}
 
 	return &TrustReadClient{
-		baseURL:    normalizedBaseURL,
-		httpClient: httpClient,
+		bearerToken: strings.TrimSpace(bearerToken),
+		baseURL:     normalizedBaseURL,
+		httpClient:  httpClient,
 	}, nil
 }
 
@@ -53,6 +61,7 @@ func (c *TrustReadClient) GetIssuerTrustRecord(ctx context.Context, issuerID str
 	if err != nil {
 		return IssuerTrustRecord{}, fmt.Errorf("build trust registry request: %w", err)
 	}
+	request.Header.Set("Authorization", "Bearer "+c.bearerToken)
 
 	response, err := c.httpClient.Do(request)
 	if err != nil {
@@ -64,6 +73,8 @@ func (c *TrustReadClient) GetIssuerTrustRecord(ctx context.Context, issuerID str
 	case http.StatusOK:
 	case http.StatusNotFound:
 		return IssuerTrustRecord{}, ErrRecordNotFound
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return IssuerTrustRecord{}, ErrTrustRuntimeUnauthorized
 	default:
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
 		return IssuerTrustRecord{}, fmt.Errorf("trust registry returned %d: %s", response.StatusCode, strings.TrimSpace(string(body)))

@@ -13,13 +13,16 @@ func TestTrustReadClientLoadsIssuerTrustRecord(t *testing.T) {
 		if r.URL.Path != "/internal/v1/phase1/issuers/did:web:issuer.hdip.dev/trust" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+		if authorizationHeader := r.Header.Get("Authorization"); authorizationHeader != "Bearer trust-runtime-test-token" {
+			t.Fatalf("unexpected authorization header: %q", authorizationHeader)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issuerId":"did:web:issuer.hdip.dev","trustState":"active","allowedTemplateIds":["hdip-passport-basic"],"verificationKeyReferences":["key:issuer.hdip.dev:2026-04"]}`))
 	}))
 	defer server.Close()
 
-	client, err := NewTrustReadClient(server.URL, server.Client())
+	client, err := NewTrustReadClient(server.URL, "trust-runtime-test-token", server.Client())
 	if err != nil {
 		t.Fatalf("new trust client: %v", err)
 	}
@@ -40,7 +43,7 @@ func TestTrustReadClientReturnsNotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewTrustReadClient(server.URL, server.Client())
+	client, err := NewTrustReadClient(server.URL, "trust-runtime-test-token", server.Client())
 	if err != nil {
 		t.Fatalf("new trust client: %v", err)
 	}
@@ -48,5 +51,22 @@ func TestTrustReadClientReturnsNotFound(t *testing.T) {
 	_, err = client.GetIssuerTrustRecord(context.Background(), "did:web:issuer.hdip.dev")
 	if !errors.Is(err, ErrRecordNotFound) {
 		t.Fatalf("expected ErrRecordNotFound, got %v", err)
+	}
+}
+
+func TestTrustReadClientReturnsUnauthorizedOnMissingOrInvalidInternalAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	client, err := NewTrustReadClient(server.URL, "wrong-token", server.Client())
+	if err != nil {
+		t.Fatalf("new trust client: %v", err)
+	}
+
+	_, err = client.GetIssuerTrustRecord(context.Background(), "did:web:issuer.hdip.dev")
+	if !errors.Is(err, ErrTrustRuntimeUnauthorized) {
+		t.Fatalf("expected ErrTrustRuntimeUnauthorized, got %v", err)
 	}
 }

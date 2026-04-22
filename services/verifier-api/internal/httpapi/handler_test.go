@@ -21,6 +21,8 @@ import (
 	phase1 "github.com/Emiloart/HDIP/services/verifier-api/internal/phase1"
 )
 
+const verifierTrustRuntimeToken = "trust-runtime-test-token"
+
 func TestHealthHandler(t *testing.T) {
 	handler := newTestVerifierHandler(t)
 
@@ -621,6 +623,240 @@ func TestPhase1CreateVerificationUsesExplicitTrustAdapter(t *testing.T) {
 	}
 }
 
+func TestPhase1CreateVerificationDeniesSuspendedIssuerViaAuthenticatedTrustRuntime(t *testing.T) {
+	store := newVerifierStoreWithDefaults(t)
+	trustServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authorizationHeader := r.Header.Get("Authorization"); authorizationHeader != "Bearer "+verifierTrustRuntimeToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issuerId":"did:web:issuer.hdip.dev","trustState":"suspended","allowedTemplateIds":["hdip-passport-basic"],"verificationKeyReferences":["key:issuer.hdip.dev:2026-04"]}`))
+	}))
+	defer trustServer.Close()
+
+	trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
+	if err != nil {
+		t.Fatalf("new trust client: %v", err)
+	}
+
+	handler := newMuxWithPhase1Handler(
+		slog.Default(),
+		testVerifierConfig(t),
+		newPhase1VerifierHandlerWithStoreAndTrust(store, trusts),
+	)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/verifier/verifications",
+		strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
+	)
+	setVerifierPhase1Headers(request, []string{verifierCreateScope})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+
+	var response verificationResultPayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Decision != "deny" || len(response.ReasonCodes) != 1 || response.ReasonCodes[0] != "issuer_suspended" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestPhase1CreateVerificationDeniesMissingOrNonActiveIssuerViaAuthenticatedTrustRuntime(t *testing.T) {
+	testCases := []struct {
+		name         string
+		statusCode   int
+		responseBody string
+	}{
+		{
+			name:       "missing issuer",
+			statusCode: http.StatusNotFound,
+		},
+		{
+			name:         "pending issuer",
+			statusCode:   http.StatusOK,
+			responseBody: `{"issuerId":"did:web:issuer.hdip.dev","trustState":"pending","allowedTemplateIds":["hdip-passport-basic"],"verificationKeyReferences":["key:issuer.hdip.dev:2026-04"]}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := newVerifierStoreWithDefaults(t)
+			trustServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if authorizationHeader := r.Header.Get("Authorization"); authorizationHeader != "Bearer "+verifierTrustRuntimeToken {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+
+				if testCase.statusCode != http.StatusOK {
+					http.Error(w, "not found", testCase.statusCode)
+					return
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(testCase.responseBody))
+			}))
+			defer trustServer.Close()
+
+			trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
+			if err != nil {
+				t.Fatalf("new trust client: %v", err)
+			}
+
+			handler := newMuxWithPhase1Handler(
+				slog.Default(),
+				testVerifierConfig(t),
+				newPhase1VerifierHandlerWithStoreAndTrust(store, trusts),
+			)
+
+			request := httptest.NewRequest(
+				http.MethodPost,
+				"/v1/verifier/verifications",
+				strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
+			)
+			setVerifierPhase1Headers(request, []string{verifierCreateScope})
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusCreated {
+				t.Fatalf("expected 201, got %d", recorder.Code)
+			}
+
+			var response verificationResultPayload
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+
+			if response.Decision != "deny" || len(response.ReasonCodes) != 1 || response.ReasonCodes[0] != "issuer_not_trusted" {
+				t.Fatalf("unexpected response: %+v", response)
+			}
+		})
+	}
+}
+
+func TestPhase1CreateVerificationFailsClosedOnTrustRuntimeUnauthorized(t *testing.T) {
+	store := newVerifierStoreWithDefaults(t)
+	trustServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer trustServer.Close()
+
+	trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
+	if err != nil {
+		t.Fatalf("new trust client: %v", err)
+	}
+
+	handler := newMuxWithPhase1Handler(
+		slog.Default(),
+		testVerifierConfig(t),
+		newPhase1VerifierHandlerWithStoreAndTrust(store, trusts),
+	)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/verifier/verifications",
+		strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
+	)
+	setVerifierPhase1Headers(request, []string{verifierCreateScope})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+
+	var response verificationResultPayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Decision != "deny" || len(response.ReasonCodes) != 1 || response.ReasonCodes[0] != "issuer_not_trusted" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestPhase1CreateVerificationReflectsAuthenticatedTrustRuntimeUpdates(t *testing.T) {
+	store := newVerifierStoreWithDefaults(t)
+	trustState := "active"
+	trustServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authorizationHeader := r.Header.Get("Authorization"); authorizationHeader != "Bearer "+verifierTrustRuntimeToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issuerId":"did:web:issuer.hdip.dev","trustState":"` + trustState + `","allowedTemplateIds":["hdip-passport-basic"],"verificationKeyReferences":["key:issuer.hdip.dev:2026-04"]}`))
+	}))
+	defer trustServer.Close()
+
+	trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
+	if err != nil {
+		t.Fatalf("new trust client: %v", err)
+	}
+
+	handler := newMuxWithPhase1Handler(
+		slog.Default(),
+		testVerifierConfig(t),
+		newPhase1VerifierHandlerWithStoreAndTrust(store, trusts),
+	)
+
+	firstRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/verifier/verifications",
+		strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
+	)
+	setVerifierPhase1Headers(firstRequest, []string{verifierCreateScope})
+	firstRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstRecorder, firstRequest)
+
+	if firstRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected initial 201, got %d", firstRecorder.Code)
+	}
+
+	var allowed verificationResultPayload
+	if err := json.Unmarshal(firstRecorder.Body.Bytes(), &allowed); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	if allowed.Decision != "allow" {
+		t.Fatalf("expected allow decision, got %+v", allowed)
+	}
+
+	trustState = "suspended"
+
+	secondRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/verifier/verifications",
+		strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
+	)
+	setVerifierPhase1Headers(secondRequest, []string{verifierCreateScope})
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, secondRequest)
+
+	if secondRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected second 201, got %d", secondRecorder.Code)
+	}
+
+	var denied verificationResultPayload
+	if err := json.Unmarshal(secondRecorder.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("decode second response: %v", err)
+	}
+
+	if denied.Decision != "deny" || len(denied.ReasonCodes) != 1 || denied.ReasonCodes[0] != "issuer_suspended" {
+		t.Fatalf("unexpected denied response: %+v", denied)
+	}
+}
+
 func TestPhase1PrimarySQLVerificationRoundTrip(t *testing.T) {
 	dsn := os.Getenv("HDIP_PHASE1_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -651,12 +887,17 @@ func TestPhase1PrimarySQLVerificationRoundTrip(t *testing.T) {
 	}
 
 	trustServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authorizationHeader := r.Header.Get("Authorization"); authorizationHeader != "Bearer "+verifierTrustRuntimeToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issuerId":"did:web:issuer.hdip.dev","trustState":"active","allowedTemplateIds":["hdip-passport-basic"],"verificationKeyReferences":["key:issuer.hdip.dev:2026-04"]}`))
 	}))
 	defer trustServer.Close()
 
-	trusts, err := phase1.NewTrustReadClient(trustServer.URL, trustServer.Client())
+	trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
 	if err != nil {
 		t.Fatalf("new trust client: %v", err)
 	}
@@ -776,16 +1017,17 @@ func testVerifierConfig(t *testing.T) config.Config {
 	t.Helper()
 
 	return config.Config{
-		ServiceName:          "verifier-api",
-		Host:                 "127.0.0.1",
-		Port:                 8082,
-		LogLevel:             "INFO",
-		RequestTimeout:       time.Second,
-		ReadHeaderTimeout:    time.Second,
-		ShutdownTimeout:      time.Second,
-		Phase1StatePath:      filepath.Join(t.TempDir(), "verifier-phase1-state.json"),
-		TrustRegistryBaseURL: "http://127.0.0.1:19083",
-		BuildVersion:         "test",
+		ServiceName:            "verifier-api",
+		Host:                   "127.0.0.1",
+		Port:                   8082,
+		LogLevel:               "INFO",
+		RequestTimeout:         time.Second,
+		ReadHeaderTimeout:      time.Second,
+		ShutdownTimeout:        time.Second,
+		Phase1StatePath:        filepath.Join(t.TempDir(), "verifier-phase1-state.json"),
+		TrustRegistryBaseURL:   "http://127.0.0.1:19083",
+		TrustRegistryAuthToken: verifierTrustRuntimeToken,
+		BuildVersion:           "test",
 	}
 }
 
