@@ -238,8 +238,66 @@ func TestStoreCrossInstanceContinuityAndReservation(t *testing.T) {
 	}
 }
 
+func TestExplicitMigrationAndTrustBootstrapLifecycle(t *testing.T) {
+	dsn := os.Getenv("HDIP_PHASE1_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("HDIP_PHASE1_TEST_DATABASE_URL is not set")
+	}
+
+	if err := MigrateUp(context.Background(), "pgx", dsn); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	store := openTestStore(t, dsn)
+	resetTestTables(t, store)
+
+	now := time.Date(2026, time.April, 22, 14, 0, 0, 0, time.UTC)
+	result, err := ApplyTrustBootstrapDocument(context.Background(), store, "phase1sql-bootstrap.json", TrustBootstrapDocument{
+		Issuers: []TrustBootstrapIssuerRecord{
+			{
+				IssuerID:                  "did:web:issuer.lifecycle.hdip.dev",
+				DisplayName:               "HDIP Passport Issuer",
+				TrustState:                "active",
+				AllowedTemplateIDs:        []string{"hdip-passport-basic"},
+				VerificationKeyReferences: []string{"key:issuer.hdip.dev:2026-04"},
+			},
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("apply trust bootstrap document: %v", err)
+	}
+
+	if result.Applied != 1 {
+		t.Fatalf("expected 1 applied issuer, got %d", result.Applied)
+	}
+
+	if err := store.RequireSchema(context.Background()); err != nil {
+		t.Fatalf("require schema after migrate: %v", err)
+	}
+
+	record, err := store.GetIssuerRecord(context.Background(), "did:web:issuer.lifecycle.hdip.dev")
+	if err != nil {
+		t.Fatalf("load issuer record: %v", err)
+	}
+	if record.TrustState != "active" {
+		t.Fatalf("unexpected issuer record: %+v", record)
+	}
+
+	audits, err := store.ListAuditRecords(context.Background())
+	if err != nil {
+		t.Fatalf("list audit records: %v", err)
+	}
+	if len(audits) != 1 || audits[0].Action != TrustBootstrapAction {
+		t.Fatalf("unexpected audit records: %+v", audits)
+	}
+}
+
 func openTestStore(t *testing.T, dsn string) *Store {
 	t.Helper()
+
+	if err := MigrateUp(context.Background(), "pgx", dsn); err != nil {
+		t.Fatalf("migrate test store: %v", err)
+	}
 
 	store, err := Open("pgx", dsn)
 	if err != nil {

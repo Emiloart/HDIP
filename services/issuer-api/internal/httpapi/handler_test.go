@@ -650,6 +650,10 @@ func TestPhase1PrimarySQLStoreRoundTrip(t *testing.T) {
 		t.Skip("HDIP_PHASE1_TEST_DATABASE_URL is not set")
 	}
 
+	if err := phase1sql.MigrateUp(context.Background(), "pgx", dsn); err != nil {
+		t.Fatalf("migrate sql store: %v", err)
+	}
+
 	sqlStore, err := phase1sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("open sql store: %v", err)

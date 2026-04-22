@@ -79,7 +79,19 @@ func newPhase1VerifierHandler(cfg config.Config) (*phase1VerifierHandler, error)
 		return nil, err
 	}
 
-	trusts, err := phase1.NewTrustReadClient(cfg.TrustRegistryBaseURL, cfg.TrustRegistryAuthToken, &http.Client{
+	tokenSource, err := phase1.NewHydraClientCredentialsTokenSource(
+		cfg.TrustRuntimeHydraTokenURL,
+		cfg.TrustRuntimeHydraClientID,
+		cfg.TrustRuntimeHydraClientSecret,
+		cfg.TrustRuntimeHydraScope,
+		&http.Client{Timeout: cfg.RequestTimeout},
+	)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+
+	trusts, err := phase1.NewTrustReadClient(cfg.TrustRegistryBaseURL, tokenSource, &http.Client{
 		Timeout: cfg.RequestTimeout,
 	})
 	if err != nil {

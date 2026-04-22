@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	phase1sql "github.com/Emiloart/HDIP/services/internal/phase1sql"
 )
 
 const bootstrapAction = "trust-registry.phase1.bootstrap.apply"
@@ -33,6 +35,14 @@ func ApplyBootstrapFile(ctx context.Context, store *RuntimeStore, path string, n
 	if store == nil {
 		return BootstrapResult{}, errors.New("runtime store is required")
 	}
+	if store.sql != nil {
+		result, err := phase1sql.ApplyTrustBootstrapFile(ctx, store.sql, path, now)
+		if err != nil {
+			return BootstrapResult{}, err
+		}
+
+		return BootstrapResult{Applied: result.Applied}, nil
+	}
 
 	trimmedPath := strings.TrimSpace(path)
 	if trimmedPath == "" {
@@ -55,6 +65,14 @@ func ApplyBootstrapFile(ctx context.Context, store *RuntimeStore, path string, n
 func ApplyBootstrapDocument(ctx context.Context, store *RuntimeStore, source string, document BootstrapDocument, now time.Time) (BootstrapResult, error) {
 	if store == nil {
 		return BootstrapResult{}, errors.New("runtime store is required")
+	}
+	if store.sql != nil {
+		result, err := phase1sql.ApplyTrustBootstrapDocument(ctx, store.sql, source, toSQLBootstrapDocument(document), now)
+		if err != nil {
+			return BootstrapResult{}, err
+		}
+
+		return BootstrapResult{Applied: result.Applied}, nil
 	}
 
 	if now.IsZero() {
@@ -136,4 +154,19 @@ func bootstrapActor(source string) Actor {
 		Scopes:                  []string{"trust.runtime.bootstrap"},
 		AuthenticationReference: "bootstrap:" + source,
 	}
+}
+
+func toSQLBootstrapDocument(document BootstrapDocument) phase1sql.TrustBootstrapDocument {
+	issuers := make([]phase1sql.TrustBootstrapIssuerRecord, 0, len(document.Issuers))
+	for _, issuer := range document.Issuers {
+		issuers = append(issuers, phase1sql.TrustBootstrapIssuerRecord{
+			IssuerID:                  issuer.IssuerID,
+			DisplayName:               issuer.DisplayName,
+			TrustState:                issuer.TrustState,
+			AllowedTemplateIDs:        append([]string(nil), issuer.AllowedTemplateIDs...),
+			VerificationKeyReferences: append([]string(nil), issuer.VerificationKeyReferences...),
+		})
+	}
+
+	return phase1sql.TrustBootstrapDocument{Issuers: issuers}
 }

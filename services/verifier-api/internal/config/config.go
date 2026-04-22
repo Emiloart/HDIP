@@ -13,19 +13,22 @@ import (
 const serviceName = "verifier-api"
 
 type Config struct {
-	ServiceName            string
-	Host                   string
-	Port                   int
-	LogLevel               string
-	RequestTimeout         time.Duration
-	ReadHeaderTimeout      time.Duration
-	ShutdownTimeout        time.Duration
-	Phase1DatabaseDriver   string
-	Phase1DatabaseURL      string
-	Phase1StatePath        string
-	TrustRegistryBaseURL   string
-	TrustRegistryAuthToken string
-	BuildVersion           string
+	ServiceName                   string
+	Host                          string
+	Port                          int
+	LogLevel                      string
+	RequestTimeout                time.Duration
+	ReadHeaderTimeout             time.Duration
+	ShutdownTimeout               time.Duration
+	Phase1DatabaseDriver          string
+	Phase1DatabaseURL             string
+	Phase1StatePath               string
+	TrustRegistryBaseURL          string
+	TrustRuntimeHydraTokenURL     string
+	TrustRuntimeHydraClientID     string
+	TrustRuntimeHydraClientSecret string
+	TrustRuntimeHydraScope        string
+	BuildVersion                  string
 }
 
 func Load() (Config, error) {
@@ -50,19 +53,22 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		ServiceName:            serviceName,
-		Host:                   getenv("HDIP_HOST", "127.0.0.1"),
-		Port:                   port,
-		LogLevel:               getenv("HDIP_LOG_LEVEL", "INFO"),
-		RequestTimeout:         requestTimeout,
-		ReadHeaderTimeout:      readHeaderTimeout,
-		ShutdownTimeout:        shutdownTimeout,
-		Phase1DatabaseDriver:   getenv("HDIP_PHASE1_DATABASE_DRIVER", "pgx"),
-		Phase1DatabaseURL:      getenv("HDIP_PHASE1_DATABASE_URL", ""),
-		Phase1StatePath:        phase1StatePath(),
-		TrustRegistryBaseURL:   getenv("HDIP_TRUST_REGISTRY_BASE_URL", "http://127.0.0.1:8083"),
-		TrustRegistryAuthToken: getenv("HDIP_TRUST_REGISTRY_INTERNAL_AUTH_TOKEN", ""),
-		BuildVersion:           getenv("HDIP_BUILD_VERSION", "dev"),
+		ServiceName:                   serviceName,
+		Host:                          getenv("HDIP_HOST", "127.0.0.1"),
+		Port:                          port,
+		LogLevel:                      getenv("HDIP_LOG_LEVEL", "INFO"),
+		RequestTimeout:                requestTimeout,
+		ReadHeaderTimeout:             readHeaderTimeout,
+		ShutdownTimeout:               shutdownTimeout,
+		Phase1DatabaseDriver:          getenv("HDIP_PHASE1_DATABASE_DRIVER", "pgx"),
+		Phase1DatabaseURL:             getenv("HDIP_PHASE1_DATABASE_URL", ""),
+		Phase1StatePath:               phase1StatePath(),
+		TrustRegistryBaseURL:          getenv("HDIP_TRUST_REGISTRY_BASE_URL", "http://127.0.0.1:8083"),
+		TrustRuntimeHydraTokenURL:     getenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", ""),
+		TrustRuntimeHydraClientID:     getenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", ""),
+		TrustRuntimeHydraClientSecret: getenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", ""),
+		TrustRuntimeHydraScope:        getenv("HDIP_TRUST_RUNTIME_HYDRA_SCOPE", "trust.runtime.read"),
+		BuildVersion:                  getenv("HDIP_BUILD_VERSION", "dev"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -88,8 +94,14 @@ func (c Config) Validate() error {
 		return errors.New("phase1 database url or transitional state path must be configured")
 	case strings.TrimSpace(c.TrustRegistryBaseURL) == "":
 		return errors.New("trust registry base url must not be empty")
-	case strings.TrimSpace(c.TrustRegistryAuthToken) == "":
-		return errors.New("trust registry internal auth token must be configured")
+	case strings.TrimSpace(c.TrustRuntimeHydraTokenURL) == "":
+		return errors.New("trust runtime hydra token url must be configured")
+	case strings.TrimSpace(c.TrustRuntimeHydraClientID) == "":
+		return errors.New("trust runtime hydra client id must be configured")
+	case strings.TrimSpace(c.TrustRuntimeHydraClientSecret) == "":
+		return errors.New("trust runtime hydra client secret must be configured")
+	case strings.TrimSpace(c.TrustRuntimeHydraScope) == "":
+		return errors.New("trust runtime hydra scope must be configured")
 	default:
 		return nil
 	}

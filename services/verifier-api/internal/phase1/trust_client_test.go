@@ -3,10 +3,26 @@ package phase1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+type staticTokenSource string
+
+func (s staticTokenSource) Token(context.Context) (string, error) {
+	return string(s), nil
+}
+
+type failingTokenSource struct {
+	err error
+}
+
+func (s failingTokenSource) Token(context.Context) (string, error) {
+	return "", s.err
+}
 
 func TestTrustReadClientLoadsIssuerTrustRecord(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +38,7 @@ func TestTrustReadClientLoadsIssuerTrustRecord(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewTrustReadClient(server.URL, "trust-runtime-test-token", server.Client())
+	client, err := NewTrustReadClient(server.URL, staticTokenSource("trust-runtime-test-token"), server.Client())
 	if err != nil {
 		t.Fatalf("new trust client: %v", err)
 	}
@@ -43,7 +59,7 @@ func TestTrustReadClientReturnsNotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewTrustReadClient(server.URL, "trust-runtime-test-token", server.Client())
+	client, err := NewTrustReadClient(server.URL, staticTokenSource("trust-runtime-test-token"), server.Client())
 	if err != nil {
 		t.Fatalf("new trust client: %v", err)
 	}
@@ -60,7 +76,7 @@ func TestTrustReadClientReturnsUnauthorizedOnMissingOrInvalidInternalAuth(t *tes
 	}))
 	defer server.Close()
 
-	client, err := NewTrustReadClient(server.URL, "wrong-token", server.Client())
+	client, err := NewTrustReadClient(server.URL, staticTokenSource("wrong-token"), server.Client())
 	if err != nil {
 		t.Fatalf("new trust client: %v", err)
 	}
@@ -68,5 +84,17 @@ func TestTrustReadClientReturnsUnauthorizedOnMissingOrInvalidInternalAuth(t *tes
 	_, err = client.GetIssuerTrustRecord(context.Background(), "did:web:issuer.hdip.dev")
 	if !errors.Is(err, ErrTrustRuntimeUnauthorized) {
 		t.Fatalf("expected ErrTrustRuntimeUnauthorized, got %v", err)
+	}
+}
+
+func TestTrustReadClientFailsWhenTokenAcquisitionFails(t *testing.T) {
+	client, err := NewTrustReadClient("http://127.0.0.1:8083", failingTokenSource{err: fmt.Errorf("token endpoint unavailable")}, nil)
+	if err != nil {
+		t.Fatalf("new trust client: %v", err)
+	}
+
+	_, err = client.GetIssuerTrustRecord(context.Background(), "did:web:issuer.hdip.dev")
+	if err == nil || !strings.Contains(err.Error(), "acquire trust runtime access token") {
+		t.Fatalf("expected token acquisition error, got %v", err)
 	}
 }

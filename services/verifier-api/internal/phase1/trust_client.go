@@ -14,8 +14,12 @@ import (
 
 var ErrTrustRuntimeUnauthorized = errors.New("trust runtime request unauthorized")
 
+type AccessTokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
 type TrustReadClient struct {
-	bearerToken string
+	tokenSource AccessTokenSource
 	baseURL     string
 	httpClient  *http.Client
 }
@@ -27,13 +31,13 @@ type trustSnapshotPayload struct {
 	VerificationKeyReferences []string `json:"verificationKeyReferences"`
 }
 
-func NewTrustReadClient(baseURL string, bearerToken string, httpClient *http.Client) (*TrustReadClient, error) {
+func NewTrustReadClient(baseURL string, tokenSource AccessTokenSource, httpClient *http.Client) (*TrustReadClient, error) {
 	normalizedBaseURL := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if normalizedBaseURL == "" {
 		return nil, fmt.Errorf("trust registry base url must not be empty")
 	}
-	if strings.TrimSpace(bearerToken) == "" {
-		return nil, fmt.Errorf("trust registry internal auth token must not be empty")
+	if tokenSource == nil {
+		return nil, fmt.Errorf("trust runtime access token source is required")
 	}
 
 	if _, err := url.Parse(normalizedBaseURL); err != nil {
@@ -45,13 +49,18 @@ func NewTrustReadClient(baseURL string, bearerToken string, httpClient *http.Cli
 	}
 
 	return &TrustReadClient{
-		bearerToken: strings.TrimSpace(bearerToken),
+		tokenSource: tokenSource,
 		baseURL:     normalizedBaseURL,
 		httpClient:  httpClient,
 	}, nil
 }
 
 func (c *TrustReadClient) GetIssuerTrustRecord(ctx context.Context, issuerID string) (IssuerTrustRecord, error) {
+	bearerToken, err := c.tokenSource.Token(ctx)
+	if err != nil {
+		return IssuerTrustRecord{}, fmt.Errorf("acquire trust runtime access token: %w", err)
+	}
+
 	request, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
@@ -61,7 +70,7 @@ func (c *TrustReadClient) GetIssuerTrustRecord(ctx context.Context, issuerID str
 	if err != nil {
 		return IssuerTrustRecord{}, fmt.Errorf("build trust registry request: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+c.bearerToken)
+	request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(bearerToken))
 
 	response, err := c.httpClient.Do(request)
 	if err != nil {

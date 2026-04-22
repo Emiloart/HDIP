@@ -6,6 +6,7 @@ import {
   auditRecordSchema,
   credentialRecordSchema,
   credentialStatusSchema,
+  credentialStatusUpdateRequestSchema,
   credentialTemplateMetadataSchema,
   errorEnvelopeSchema,
   healthResponseSchema,
@@ -27,6 +28,7 @@ type ContractName =
   | "credentialTemplateMetadata"
   | "issuanceRequest"
   | "issuanceResponse"
+  | "credentialStatusUpdateRequest"
   | "credentialRecord"
   | "credentialStatus"
   | "verificationSubmissionRequest"
@@ -57,6 +59,7 @@ const contractSchemas = {
   credentialTemplateMetadata: credentialTemplateMetadataSchema,
   issuanceRequest: issuanceRequestSchema,
   issuanceResponse: issuanceResponseSchema,
+  credentialStatusUpdateRequest: credentialStatusUpdateRequestSchema,
   credentialRecord: credentialRecordSchema,
   credentialStatus: credentialStatusSchema,
   verificationSubmissionRequest: verificationSubmissionRequestSchema,

@@ -7,7 +7,7 @@
 ## Change summary
 
 This threat model covers the Phase 1 transition from a read-only stub issuer/verifier flow to a real reusable KYC credential and verifier API.
-The Phase 1 boundary now adds authenticated issuer writes, authenticated verifier writes, Cockroach-compatible relational persistence for credential and verification state, append-only audit records, issuer-authenticated credential status mutation, reservation-state idempotency for write paths, trust-registry-owned runtime reads through an explicit verifier trust-read adapter, trust-registry-owned runtime trust bootstrap, and a governed next-step internal service identity model of Hydra client-credentials plus introspection to replace the currently landed transitional static bearer token.
+The Phase 1 boundary now adds authenticated issuer writes, authenticated verifier writes, Cockroach-compatible relational persistence for credential and verification state, append-only audit records, issuer-authenticated credential status mutation, reservation-state idempotency for write paths, trust-registry-owned runtime reads through an explicit verifier trust-read adapter, trust-registry-owned runtime trust bootstrap, Hydra client-credentials plus introspection for internal trust runtime identity, and an explicit shared `phase1sql` migration/bootstrap CLI with versioned SQL assets on the primary SQL path.
 
 ## Assets
 
@@ -118,15 +118,14 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - opaque Phase 1 artifacts do not provide cryptographic authenticity until a later signing model is approved
 - synchronous verifier evaluation can still be abused for denial-of-service without future rate or risk controls
 - trust-registry remains an HDIP-controlled dependency rather than a federated trust network in Phase 1
-- the currently landed static trust bearer token remains transitional until the Hydra client-credentials plus introspection implementation slice lands
 - Hydra introspection introduces a new internal dependency whose availability and latency affect trust-runtime-read success
 - transitional JSON state fallback still exists for compatibility and tests, so local misuse of fallback configuration could bypass the primary relational path
 - if implementation cuts corners on idempotency conflict handling or audit immutability, replay and repudiation risk will remain elevated
-- until the explicit `phase1sql` CLI lifecycle lands, startup-time schema mutation remains transitional behavior in the primary SQL implementation
+- operational mis-ordering of `phase1sql migrate up` and `phase1sql bootstrap trust` can still block startup until deployment automation and fallback retirement are tightened
 
 ## Validation impact
 
-The first real Phase 1 code slice must add:
+Phase 1 code must maintain:
 
 - schema validation for issuance, credential status, and verification contracts
 - TypeScript parity coverage for the new Phase 1 contracts
@@ -152,4 +151,5 @@ The first real Phase 1 code slice must add:
 - `docs/adr/0008-phase1-auth-and-attribution-boundary.md`
 - `docs/adr/0009-phase1-opaque-artifact-and-suspended-issuer-policy.md`
 - `docs/adr/0010-phase1-internal-trust-service-identity-and-sql-lifecycle.md`
-- `docs/plans/active/0013-phase1-hydra-internal-trust-auth-and-phase1sql-lifecycle.md`
+- `docs/plans/archive/0013-phase1-hydra-internal-trust-auth-and-phase1sql-lifecycle.md`
+- `docs/plans/active/0014-phase1-sql-primary-hardening-and-fallback-retirement.md`

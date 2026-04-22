@@ -1,6 +1,6 @@
 # 0013 Phase 1 Hydra Internal Trust Auth And Phase1SQL Lifecycle
 
-- Status: active
+- Status: completed
 - Date: 2026-04-22
 - Owners: repository maintainer
 
@@ -77,3 +77,4 @@ Do not keep a half-migrated state where runtime trust reads use the new Hydra pa
 
 - whether a later broader internal service-identity rollout should reuse the same Hydra introspection pattern for other resource-server boundaries
 - whether the transitional JSON fallback should be removed immediately after the explicit `phase1sql` lifecycle stabilizes or in a later persistence-hardening slice
+- follow-up implementation now continues in `docs/plans/active/0014-phase1-sql-primary-hardening-and-fallback-retirement.md`

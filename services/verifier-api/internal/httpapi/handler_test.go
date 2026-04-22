@@ -21,7 +21,7 @@ import (
 	phase1 "github.com/Emiloart/HDIP/services/verifier-api/internal/phase1"
 )
 
-const verifierTrustRuntimeToken = "trust-runtime-test-token"
+const verifierTrustRuntimeToken = "hydra-trust-runtime-access-token"
 
 func TestHealthHandler(t *testing.T) {
 	handler := newTestVerifierHandler(t)
@@ -636,10 +636,7 @@ func TestPhase1CreateVerificationDeniesSuspendedIssuerViaAuthenticatedTrustRunti
 	}))
 	defer trustServer.Close()
 
-	trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
-	if err != nil {
-		t.Fatalf("new trust client: %v", err)
-	}
+	trusts := newHydraTrustReadClient(t, trustServer.URL, trustServer.Client())
 
 	handler := newMuxWithPhase1Handler(
 		slog.Default(),
@@ -707,10 +704,7 @@ func TestPhase1CreateVerificationDeniesMissingOrNonActiveIssuerViaAuthenticatedT
 			}))
 			defer trustServer.Close()
 
-			trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
-			if err != nil {
-				t.Fatalf("new trust client: %v", err)
-			}
+			trusts := newHydraTrustReadClient(t, trustServer.URL, trustServer.Client())
 
 			handler := newMuxWithPhase1Handler(
 				slog.Default(),
@@ -751,10 +745,7 @@ func TestPhase1CreateVerificationFailsClosedOnTrustRuntimeUnauthorized(t *testin
 	}))
 	defer trustServer.Close()
 
-	trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
-	if err != nil {
-		t.Fatalf("new trust client: %v", err)
-	}
+	trusts := newHydraTrustReadClient(t, trustServer.URL, trustServer.Client())
 
 	handler := newMuxWithPhase1Handler(
 		slog.Default(),
@@ -800,10 +791,7 @@ func TestPhase1CreateVerificationReflectsAuthenticatedTrustRuntimeUpdates(t *tes
 	}))
 	defer trustServer.Close()
 
-	trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
-	if err != nil {
-		t.Fatalf("new trust client: %v", err)
-	}
+	trusts := newHydraTrustReadClient(t, trustServer.URL, trustServer.Client())
 
 	handler := newMuxWithPhase1Handler(
 		slog.Default(),
@@ -863,6 +851,10 @@ func TestPhase1PrimarySQLVerificationRoundTrip(t *testing.T) {
 		t.Skip("HDIP_PHASE1_TEST_DATABASE_URL is not set")
 	}
 
+	if err := phase1sql.MigrateUp(context.Background(), "pgx", dsn); err != nil {
+		t.Fatalf("migrate sql store: %v", err)
+	}
+
 	sqlStore, err := phase1sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("open sql store: %v", err)
@@ -897,10 +889,7 @@ func TestPhase1PrimarySQLVerificationRoundTrip(t *testing.T) {
 	}))
 	defer trustServer.Close()
 
-	trusts, err := phase1.NewTrustReadClient(trustServer.URL, verifierTrustRuntimeToken, trustServer.Client())
-	if err != nil {
-		t.Fatalf("new trust client: %v", err)
-	}
+	trusts := newHydraTrustReadClient(t, trustServer.URL, trustServer.Client())
 
 	handler := newMuxWithPhase1Handler(
 		slog.Default(),
@@ -1017,18 +1006,62 @@ func testVerifierConfig(t *testing.T) config.Config {
 	t.Helper()
 
 	return config.Config{
-		ServiceName:            "verifier-api",
-		Host:                   "127.0.0.1",
-		Port:                   8082,
-		LogLevel:               "INFO",
-		RequestTimeout:         time.Second,
-		ReadHeaderTimeout:      time.Second,
-		ShutdownTimeout:        time.Second,
-		Phase1StatePath:        filepath.Join(t.TempDir(), "verifier-phase1-state.json"),
-		TrustRegistryBaseURL:   "http://127.0.0.1:19083",
-		TrustRegistryAuthToken: verifierTrustRuntimeToken,
-		BuildVersion:           "test",
+		ServiceName:                   "verifier-api",
+		Host:                          "127.0.0.1",
+		Port:                          8082,
+		LogLevel:                      "INFO",
+		RequestTimeout:                time.Second,
+		ReadHeaderTimeout:             time.Second,
+		ShutdownTimeout:               time.Second,
+		Phase1StatePath:               filepath.Join(t.TempDir(), "verifier-phase1-state.json"),
+		TrustRegistryBaseURL:          "http://127.0.0.1:19083",
+		TrustRuntimeHydraTokenURL:     "http://127.0.0.1:4444/oauth2/token",
+		TrustRuntimeHydraClientID:     "verifier-api",
+		TrustRuntimeHydraClientSecret: "trust-runtime-test-secret",
+		TrustRuntimeHydraScope:        "trust.runtime.read",
+		BuildVersion:                  "test",
 	}
+}
+
+func newHydraTrustReadClient(t *testing.T, trustRuntimeBaseURL string, trustRuntimeHTTPClient *http.Client) phase1.TrustReadRepository {
+	t.Helper()
+
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse hydra token form: %v", err)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected hydra token method: %s", r.Method)
+		}
+		if r.Form.Get("grant_type") != "client_credentials" {
+			t.Fatalf("unexpected hydra grant type: %s", r.Form.Get("grant_type"))
+		}
+		if r.Form.Get("scope") != "trust.runtime.read" {
+			t.Fatalf("unexpected hydra scope: %s", r.Form.Get("scope"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"` + verifierTrustRuntimeToken + `","token_type":"bearer","expires_in":120}`))
+	}))
+	t.Cleanup(tokenServer.Close)
+
+	tokenSource, err := phase1.NewHydraClientCredentialsTokenSource(
+		tokenServer.URL,
+		"verifier-api",
+		"trust-runtime-test-secret",
+		"trust.runtime.read",
+		tokenServer.Client(),
+	)
+	if err != nil {
+		t.Fatalf("new hydra token source: %v", err)
+	}
+
+	trusts, err := phase1.NewTrustReadClient(trustRuntimeBaseURL, tokenSource, trustRuntimeHTTPClient)
+	if err != nil {
+		t.Fatalf("new trust client: %v", err)
+	}
+
+	return trusts
 }
 
 func setVerifierPhase1Headers(request *http.Request, scopes []string) {

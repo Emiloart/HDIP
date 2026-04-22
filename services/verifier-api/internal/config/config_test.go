@@ -9,7 +9,9 @@ import (
 func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("HDIP_HOST", "")
 	t.Setenv("HDIP_PORT", "")
-	t.Setenv("HDIP_TRUST_REGISTRY_INTERNAL_AUTH_TOKEN", "trust-runtime-test-token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
 
 	cfg, err := Load()
 	if err != nil {
@@ -23,18 +25,21 @@ func TestLoadUsesDefaults(t *testing.T) {
 
 func TestValidateRejectsInvalidPort(t *testing.T) {
 	cfg := Config{
-		ServiceName:            serviceName,
-		Host:                   "127.0.0.1",
-		Port:                   70000,
-		LogLevel:               "INFO",
-		RequestTimeout:         time.Second,
-		ReadHeaderTimeout:      time.Second,
-		ShutdownTimeout:        time.Second,
-		Phase1DatabaseDriver:   "pgx",
-		Phase1StatePath:        "phase1-state.json",
-		TrustRegistryBaseURL:   "http://127.0.0.1:8083",
-		TrustRegistryAuthToken: "trust-runtime-test-token",
-		BuildVersion:           "dev",
+		ServiceName:                   serviceName,
+		Host:                          "127.0.0.1",
+		Port:                          70000,
+		LogLevel:                      "INFO",
+		RequestTimeout:                time.Second,
+		ReadHeaderTimeout:             time.Second,
+		ShutdownTimeout:               time.Second,
+		Phase1DatabaseDriver:          "pgx",
+		Phase1StatePath:               "phase1-state.json",
+		TrustRegistryBaseURL:          "http://127.0.0.1:8083",
+		TrustRuntimeHydraTokenURL:     "http://127.0.0.1:4444/oauth2/token",
+		TrustRuntimeHydraClientID:     "verifier-api",
+		TrustRuntimeHydraClientSecret: "trust-runtime-test-secret",
+		TrustRuntimeHydraScope:        "trust.runtime.read",
+		BuildVersion:                  "dev",
 	}
 
 	if err := cfg.Validate(); err == nil {
@@ -45,7 +50,9 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 func TestLoadUsesLegacyRuntimePathEnvFallback(t *testing.T) {
 	t.Setenv("HDIP_PHASE1_STATE_PATH", "")
 	t.Setenv("HDIP_PHASE1_RUNTIME_PATH", "legacy-phase1-state.json")
-	t.Setenv("HDIP_TRUST_REGISTRY_INTERNAL_AUTH_TOKEN", "trust-runtime-test-token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
 
 	cfg, err := Load()
 	if err != nil {
@@ -61,21 +68,30 @@ func TestLoadReadsTrustRegistryAndDatabaseSettings(t *testing.T) {
 	t.Setenv("HDIP_PHASE1_DATABASE_DRIVER", "sqlite")
 	t.Setenv("HDIP_PHASE1_DATABASE_URL", "file:test.db?mode=memory&cache=shared")
 	t.Setenv("HDIP_TRUST_REGISTRY_BASE_URL", "http://127.0.0.1:19083")
-	t.Setenv("HDIP_TRUST_REGISTRY_INTERNAL_AUTH_TOKEN", "trust-runtime-test-token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_SCOPE", "trust.runtime.read")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.Phase1DatabaseDriver != "sqlite" || cfg.TrustRegistryBaseURL != "http://127.0.0.1:19083" || cfg.TrustRegistryAuthToken != "trust-runtime-test-token" {
+	if cfg.Phase1DatabaseDriver != "sqlite" ||
+		cfg.TrustRegistryBaseURL != "http://127.0.0.1:19083" ||
+		cfg.TrustRuntimeHydraTokenURL != "http://127.0.0.1:4444/oauth2/token" ||
+		cfg.TrustRuntimeHydraClientID != "verifier-api" ||
+		cfg.TrustRuntimeHydraScope != "trust.runtime.read" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 }
 
 func TestLoadRejectsMalformedPortEnv(t *testing.T) {
 	t.Setenv("HDIP_PORT", "not-a-port")
-	t.Setenv("HDIP_TRUST_REGISTRY_INTERNAL_AUTH_TOKEN", "trust-runtime-test-token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
 
 	_, err := Load()
 	if err == nil {
@@ -90,7 +106,9 @@ func TestLoadRejectsMalformedPortEnv(t *testing.T) {
 func TestLoadRejectsMalformedDurationEnv(t *testing.T) {
 	t.Setenv("HDIP_PORT", "")
 	t.Setenv("HDIP_REQUEST_TIMEOUT", "forever-ish")
-	t.Setenv("HDIP_TRUST_REGISTRY_INTERNAL_AUTH_TOKEN", "trust-runtime-test-token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
 
 	_, err := Load()
 	if err == nil {
@@ -102,15 +120,17 @@ func TestLoadRejectsMalformedDurationEnv(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsMissingTrustRegistryInternalAuthToken(t *testing.T) {
-	t.Setenv("HDIP_TRUST_REGISTRY_INTERNAL_AUTH_TOKEN", "")
+func TestLoadRejectsMissingTrustRuntimeHydraTokenConfig(t *testing.T) {
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "")
 
 	_, err := Load()
 	if err == nil {
-		t.Fatal("expected missing trust registry internal auth token error")
+		t.Fatal("expected missing trust runtime hydra config error")
 	}
 
-	if !strings.Contains(err.Error(), "internal auth token") {
-		t.Fatalf("expected internal auth token error, got %v", err)
+	if !strings.Contains(err.Error(), "trust runtime hydra token url") {
+		t.Fatalf("expected hydra token url error, got %v", err)
 	}
 }
