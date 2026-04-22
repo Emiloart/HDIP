@@ -1,6 +1,6 @@
 # 0012 Phase 1 Trust Registry Writes Bootstrap And Internal Auth
 
-- Status: active
+- Status: completed
 - Date: 2026-04-22
 - Owners: repository maintainer
 
@@ -30,7 +30,7 @@ Make `trust-registry` the real owner of deterministic Phase 1 issuer trust write
 
 ## Affected files, services, or packages
 
-- `docs/plans/active/0012-phase1-trust-registry-writes-bootstrap-and-internal-auth.md`
+- `docs/plans/archive/0012-phase1-trust-registry-writes-bootstrap-and-internal-auth.md`
 - `docs/plans/archive/0011-phase1-production-persistence-and-trust-runtime-reads.md`
 - `docs/threat-model/full/0003-phase1-kyc-issuance-verification-and-auth.md`
 - `services/internal/phase1sql/`
@@ -72,4 +72,4 @@ Do not keep a mixed state where verifier runtime reads require internal auth but
 ## Open questions
 
 - whether a later trust-registry product slice should expose a richer administrative write surface or keep trust writes behind dedicated operator tooling
-- whether the future production internal auth layer should replace the static bearer token with a stronger service identity scheme without changing the current verifier trust-read boundary
+- follow-up governance and implementation for the production internal service-identity model and explicit SQL lifecycle now continue in `docs/adr/0010-phase1-internal-trust-service-identity-and-sql-lifecycle.md` and `docs/plans/active/0013-phase1-hydra-internal-trust-auth-and-phase1sql-lifecycle.md`

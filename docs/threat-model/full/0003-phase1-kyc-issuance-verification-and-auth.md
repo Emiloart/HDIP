@@ -1,13 +1,13 @@
 # 0003 Phase 1 KYC Issuance Verification And Auth Threat Model
 
 - Status: accepted
-- Date: 2026-04-20
+- Date: 2026-04-22
 - Owners: repository maintainer
 
 ## Change summary
 
 This threat model covers the Phase 1 transition from a read-only stub issuer/verifier flow to a real reusable KYC credential and verifier API.
-The Phase 1 boundary now adds authenticated issuer writes, authenticated verifier writes, Cockroach-compatible relational persistence for credential and verification state, append-only audit records, issuer-authenticated credential status mutation, reservation-state idempotency for write paths, trust-registry-owned runtime reads through an explicit verifier trust-read adapter, and trust-registry-owned runtime trust bootstrap with governed internal bearer auth on the read boundary.
+The Phase 1 boundary now adds authenticated issuer writes, authenticated verifier writes, Cockroach-compatible relational persistence for credential and verification state, append-only audit records, issuer-authenticated credential status mutation, reservation-state idempotency for write paths, trust-registry-owned runtime reads through an explicit verifier trust-read adapter, trust-registry-owned runtime trust bootstrap, and a governed next-step internal service identity model of Hydra client-credentials plus introspection to replace the currently landed transitional static bearer token.
 
 ## Assets
 
@@ -28,7 +28,9 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - `issuer-api` to the relational Phase 1 persistence boundary
 - `verifier-api` to the relational Phase 1 persistence boundary
 - `trust-registry` to the relational issuer-trust persistence boundary it owns for runtime reads
-- verifier trust-read client to the `trust-registry` internal runtime-read boundary protected by internal bearer auth
+- verifier trust-read client to the `trust-registry` internal runtime-read boundary
+- `trust-registry` to Hydra token introspection for internal runtime-read authorization
+- operational migration and bootstrap boundary for the primary `phase1sql` lifecycle
 - service edge auth-context extraction boundary
 - audit append boundary
 - typed client to backend API boundary
@@ -54,7 +56,9 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - trust-registry updates to issuer trust state or verification-key references
 - trust-registry bootstrap or apply flow for deterministic Phase 1 issuer trust state
 - service-edge auth token or credential validation
-- trust-registry internal bearer-token validation for runtime trust reads
+- Hydra client-credentials token acquisition for verifier runtime trust reads
+- Hydra token introspection for trust-registry runtime trust reads
+- explicit primary SQL migration and trust bootstrap execution for Phase 1 relational state
 
 ## Abuse and misuse cases
 
@@ -67,6 +71,14 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - treating stub-era GET endpoints as if they were authoritative production verification APIs
 - misusing credential status to enumerate or correlate credentials across verifiers
 - trusting issuer identifiers without consulting the trust-registry boundary
+
+## Failure modes
+
+- Hydra introspection outage or unreachable dependency causes `trust-registry` internal runtime trust reads to fail closed
+- introspection returning an inactive token causes `trust-registry` to reject the runtime trust read
+- introspection returning the wrong service client identity causes `trust-registry` to reject the runtime trust read
+- missing scope `trust.runtime.read` causes `trust-registry` to reject the runtime trust read
+- primary SQL schema not migrated causes the primary SQL path to fail startup or readiness rather than silently mutating schema during normal service boot
 
 ## Privacy harms
 
@@ -90,7 +102,9 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - make audit records append-only and reference sensitive artifacts by identifiers or digests
 - consult the trust-registry-owned runtime read boundary through an explicit verifier trust-read adapter for issuer trust state and verification-key references rather than a generic issuer-record path or seeded verifier-local placeholders
 - make trust-registry the only service that bootstraps or mutates runtime issuer trust state for deterministic Phase 1
-- require verifier-api to authenticate explicitly to trust-registry for runtime trust reads and fail closed on missing or invalid internal credentials
+- replace the transitional static trust bearer token with Hydra client-credentials access tokens for verifier runtime trust reads
+- require trust-registry to validate runtime trust-read access tokens through Hydra introspection and fail closed on inactive tokens, wrong client identity, or missing scope
+- move the primary SQL path to an explicit versioned `phase1sql` migration and trust-bootstrap lifecycle instead of relying on startup schema mutation as the primary control point
 - reserve caller-bound idempotency keys before write-side effects so overlapping same-key writes fail closed rather than silently duplicating state
 - make issuer-authenticated status transitions update persisted credential state before later issuer or verifier reads
 - return verifier decision `deny` for suspended or otherwise non-active issuers in deterministic Phase 1
@@ -104,9 +118,11 @@ The Phase 1 boundary now adds authenticated issuer writes, authenticated verifie
 - opaque Phase 1 artifacts do not provide cryptographic authenticity until a later signing model is approved
 - synchronous verifier evaluation can still be abused for denial-of-service without future rate or risk controls
 - trust-registry remains an HDIP-controlled dependency rather than a federated trust network in Phase 1
-- internal bearer auth on trust-registry runtime reads is still a narrow transitional service-to-service mechanism rather than the final production service identity model
+- the currently landed static trust bearer token remains transitional until the Hydra client-credentials plus introspection implementation slice lands
+- Hydra introspection introduces a new internal dependency whose availability and latency affect trust-runtime-read success
 - transitional JSON state fallback still exists for compatibility and tests, so local misuse of fallback configuration could bypass the primary relational path
 - if implementation cuts corners on idempotency conflict handling or audit immutability, replay and repudiation risk will remain elevated
+- until the explicit `phase1sql` CLI lifecycle lands, startup-time schema mutation remains transitional behavior in the primary SQL implementation
 
 ## Validation impact
 
@@ -124,7 +140,8 @@ The first real Phase 1 code slice must add:
 - tests that separate repository or runtime instances observe the same persisted credential, status, trust, and idempotency state
 - tests that trust-registry-owned runtime reads determine verifier trust outcomes through the explicit trust adapter
 - tests that trust-registry bootstrap or update actions persist issuer trust state on the primary path with bounded append-only audit records
-- tests that verifier runtime trust reads fail closed when internal trust credentials are missing or invalid
+- tests that verifier runtime trust reads fail closed when Hydra introspection reports inactive tokens, wrong client identity, or missing scope
+- tests that the explicit `phase1sql` migration and trust bootstrap lifecycle initializes the current approved Phase 1 SQL schema before service startup
 - tests that logs and audit records do not contain raw sensitive credential payloads
 
 ## Related ADRs, plans, PRs, and issues
@@ -134,4 +151,5 @@ The first real Phase 1 code slice must add:
 - `docs/adr/0007-phase1-state-and-persistence-model.md`
 - `docs/adr/0008-phase1-auth-and-attribution-boundary.md`
 - `docs/adr/0009-phase1-opaque-artifact-and-suspended-issuer-policy.md`
-- `docs/plans/active/0012-phase1-trust-registry-writes-bootstrap-and-internal-auth.md`
+- `docs/adr/0010-phase1-internal-trust-service-identity-and-sql-lifecycle.md`
+- `docs/plans/active/0013-phase1-hydra-internal-trust-auth-and-phase1sql-lifecycle.md`
