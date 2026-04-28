@@ -36,6 +36,18 @@ The intended long-term responsibility split is:
 - `docs/`: governance, plans, ADRs, threat models, standards, privacy, and architecture docs
 - `scripts/`: repo-local automation used by contributors, CI, and Codex hooks
 
+## Documentation subdirectories
+
+- `docs/adr/`: accepted, proposed, superseded, and rejected architecture decisions
+- `docs/architecture/`: broad platform architecture notes
+- `docs/deployment/`: environment and deployment topology designs
+- `docs/integration/`: external developer and SDK integration designs
+- `docs/plans/`: active and archived execution plans
+- `docs/privacy/`: privacy constraints and data-handling rules
+- `docs/product/`: product-surface flows and UX requirements
+- `docs/standards/`: standards registry and interoperability constraints
+- `docs/threat-model/`: full threat models and threat deltas
+
 ## Web surfaces
 
 Foundation slice:
