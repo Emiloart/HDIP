@@ -140,6 +140,135 @@ describe("createServiceClient", () => {
     });
   });
 
+  it("creates issuer credentials with attribution and idempotency headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          credentialId: "cred_hdip_passport_basic_001",
+          issuerId: "did:web:issuer.hdip.dev",
+          templateId: "hdip-passport-basic",
+          status: "active",
+          issuedAt: "2026-04-28T10:15:00Z",
+          expiresAt: "2027-04-28T10:15:00Z",
+          statusReference: "status:cred_hdip_passport_basic_001",
+          credentialArtifact: {
+            kind: "phase1_opaque_artifact",
+            mediaType: "application/vnd.hdip.phase1-opaque-artifact",
+            value: "opaque-artifact:v1:cred_hdip_passport_basic_001",
+          },
+        }),
+        {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createIssuerApiClient("http://127.0.0.1:8081", {
+      defaultHeaders: {
+        "X-HDIP-Principal-ID": "issuer_operator_alex",
+      },
+    });
+
+    await expect(client.issueCredential(
+      {
+        templateId: "hdip-passport-basic",
+        subjectReference: "subject_1",
+        claims: {
+          fullLegalName: "Ada Lovelace",
+          dateOfBirth: "1990-01-02",
+          countryOfResidence: "NG",
+          documentCountry: "NG",
+          kycLevel: "basic",
+          verifiedAt: "2026-04-28T10:15:00Z",
+          expiresAt: "2027-04-28T10:15:00Z",
+        },
+      },
+      { idempotencyKey: "issue-1" },
+    )).resolves.toMatchObject({
+      credentialId: "cred_hdip_passport_basic_001",
+      status: "active",
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(init.method).toBe("POST");
+    expect(headers.get("Idempotency-Key")).toBe("issue-1");
+    expect(headers.get("X-HDIP-Principal-ID")).toBe("issuer_operator_alex");
+  });
+
+  it("fetches credentials and updates credential status through the issuer client", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            credentialId: "cred_hdip_passport_basic_001",
+            issuerId: "did:web:issuer.hdip.dev",
+            templateId: "hdip-passport-basic",
+            subjectReference: "subject_1",
+            claims: {
+              fullLegalName: "Ada Lovelace",
+              dateOfBirth: "1990-01-02",
+              countryOfResidence: "NG",
+              documentCountry: "NG",
+              kycLevel: "basic",
+              verifiedAt: "2026-04-28T10:15:00Z",
+              expiresAt: "2027-04-28T10:15:00Z",
+            },
+            artifactDigest: "a".repeat(64),
+            status: "active",
+            statusReference: "status:cred_hdip_passport_basic_001",
+            issuedAt: "2026-04-28T10:15:00Z",
+            expiresAt: "2027-04-28T10:15:00Z",
+            statusUpdatedAt: "2026-04-28T10:15:00Z",
+            credentialArtifact: {
+              kind: "phase1_opaque_artifact",
+              mediaType: "application/vnd.hdip.phase1-opaque-artifact",
+              value: "opaque-artifact:v1:cred_hdip_passport_basic_001",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            credentialId: "cred_hdip_passport_basic_001",
+            status: "revoked",
+            statusReference: "status:cred_hdip_passport_basic_001",
+            statusUpdatedAt: "2026-04-28T10:20:00Z",
+            expiresAt: "2027-04-28T10:15:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createIssuerApiClient("http://127.0.0.1:8081");
+
+    await expect(client.credential("cred_hdip_passport_basic_001")).resolves.toMatchObject({
+      status: "active",
+    });
+    await expect(client.updateCredentialStatus(
+      "cred_hdip_passport_basic_001",
+      { status: "revoked" },
+      { idempotencyKey: "status-1" },
+    )).resolves.toMatchObject({
+      status: "revoked",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8081/v1/issuer/credentials/cred_hdip_passport_basic_001",
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://127.0.0.1:8081/v1/issuer/credentials/cred_hdip_passport_basic_001/status",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("fetches verifier stub results through the typed verifier client", async () => {
     vi.stubGlobal(
       "fetch",
