@@ -76,10 +76,8 @@ type credentialArtifactEnvelope struct {
 
 func newPhase1VerifierHandler(cfg config.Config) (*phase1VerifierHandler, error) {
 	store, err := phase1.OpenStore(phase1.StoreOptions{
-		RuntimeMode:           cfg.Phase1RuntimeMode,
-		DatabaseDriver:        cfg.Phase1DatabaseDriver,
-		DatabaseURL:           cfg.Phase1DatabaseURL,
-		TransitionalStatePath: cfg.Phase1StatePath,
+		DatabaseDriver: cfg.Phase1DatabaseDriver,
+		DatabaseURL:    cfg.Phase1DatabaseURL,
 	})
 	if err != nil {
 		return nil, err

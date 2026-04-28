@@ -8,95 +8,57 @@ import (
 	"time"
 
 	"github.com/Emiloart/HDIP/packages/go/foundation/authctx"
-	phase1runtime "github.com/Emiloart/HDIP/services/internal/phase1runtime"
 	phase1sql "github.com/Emiloart/HDIP/services/internal/phase1sql"
 )
 
 type StoreOptions struct {
-	RuntimeMode           string
-	DatabaseDriver        string
-	DatabaseURL           string
-	TransitionalStatePath string
+	DatabaseDriver string
+	DatabaseURL    string
 }
 
 type RuntimeStore struct {
-	mode   string
-	legacy *phase1runtime.Store
-	sql    *phase1sql.Store
+	sql *phase1sql.Store
 }
 
-const (
-	RuntimeModeSQLPrimary       = "sql-primary"
-	RuntimeModeTransitionalJSON = "transitional-json"
-)
+const RuntimeModeSQLPrimary = "sql-primary"
 
 func OpenStore(options StoreOptions) (*RuntimeStore, error) {
-	switch normalizeRuntimeMode(options.RuntimeMode) {
-	case RuntimeModeSQLPrimary:
-		if strings.TrimSpace(options.DatabaseURL) == "" {
-			return nil, fmt.Errorf("phase1 sql-primary runtime requires HDIP_PHASE1_DATABASE_URL")
-		}
-
-		store, err := phase1sql.Open(options.DatabaseDriver, options.DatabaseURL)
-		if err != nil {
-			return nil, err
-		}
-
-		if err := store.RequireTrustBootstrap(context.Background()); err != nil {
-			_ = store.Close()
-			return nil, err
-		}
-
-		return &RuntimeStore{mode: RuntimeModeSQLPrimary, sql: store}, nil
-	case RuntimeModeTransitionalJSON:
-		if strings.TrimSpace(options.TransitionalStatePath) == "" {
-			return nil, fmt.Errorf("transitional-json runtime requires HDIP_PHASE1_TRANSITIONAL_STATE_PATH")
-		}
-
-		return OpenRuntimeStore(options.TransitionalStatePath)
-	default:
-		return nil, fmt.Errorf("unsupported phase1 runtime mode %q", options.RuntimeMode)
+	if strings.TrimSpace(options.DatabaseURL) == "" {
+		return nil, fmt.Errorf("phase1 sql-primary runtime requires HDIP_PHASE1_DATABASE_URL")
 	}
-}
 
-func OpenRuntimeStore(path string) (*RuntimeStore, error) {
-	store, err := phase1runtime.Open(path)
+	store, err := phase1sql.Open(options.DatabaseDriver, options.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	return &RuntimeStore{mode: RuntimeModeTransitionalJSON, legacy: store}, nil
-}
+	if err := store.RequireTrustBootstrap(context.Background()); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
 
-func NewRuntimeStore(runtimeStore *phase1runtime.Store) *RuntimeStore {
-	return &RuntimeStore{mode: RuntimeModeTransitionalJSON, legacy: runtimeStore}
+	return NewSQLRuntimeStore(store), nil
 }
 
 func NewSQLRuntimeStore(runtimeStore *phase1sql.Store) *RuntimeStore {
-	return &RuntimeStore{mode: RuntimeModeSQLPrimary, sql: runtimeStore}
+	return &RuntimeStore{sql: runtimeStore}
 }
 
 func (s *RuntimeStore) RuntimeMode() string {
-	if s == nil || strings.TrimSpace(s.mode) == "" {
-		return RuntimeModeSQLPrimary
-	}
-
-	return s.mode
+	return RuntimeModeSQLPrimary
 }
 
 func (s *RuntimeStore) CheckReadiness(ctx context.Context, requireTrustBootstrap bool) error {
-	if s == nil {
+	if s == nil || s.sql == nil {
 		return fmt.Errorf("phase1 runtime store is required")
 	}
 
-	if s.sql != nil {
-		if err := s.sql.RequireSchema(ctx); err != nil {
+	if err := s.sql.RequireSchema(ctx); err != nil {
+		return err
+	}
+	if requireTrustBootstrap {
+		if err := s.sql.RequireTrustBootstrap(ctx); err != nil {
 			return err
-		}
-		if requireTrustBootstrap {
-			if err := s.sql.RequireTrustBootstrap(ctx); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -104,70 +66,37 @@ func (s *RuntimeStore) CheckReadiness(ctx context.Context, requireTrustBootstrap
 }
 
 func (s *RuntimeStore) Close() error {
-	if s == nil {
+	if s == nil || s.sql == nil {
 		return nil
 	}
 
-	switch {
-	case s.sql != nil:
-		return s.sql.Close()
-	case s.legacy != nil:
-		return s.legacy.Close()
-	default:
-		return nil
-	}
+	return s.sql.Close()
 }
 
 func (s *RuntimeStore) GetIssuerRecord(ctx context.Context, issuerID string) (IssuerRecord, error) {
-	if s.sql != nil {
-		record, err := s.sql.GetIssuerRecord(ctx, issuerID)
-		if err != nil {
-			return IssuerRecord{}, translateSQLError(err)
-		}
-
-		return issuerRecordFromSQL(record), nil
-	}
-
-	record, err := s.legacy.GetIssuerRecord(ctx, issuerID)
+	record, err := s.sql.GetIssuerRecord(ctx, issuerID)
 	if err != nil {
-		return IssuerRecord{}, translateRuntimeError(err)
+		return IssuerRecord{}, translateSQLError(err)
 	}
 
-	return issuerRecordFromRuntime(record), nil
+	return issuerRecordFromSQL(record), nil
 }
 
 func (s *RuntimeStore) NextCredentialID(ctx context.Context, templateID string) (string, error) {
-	if s.sql != nil {
-		return s.sql.NextCredentialID(ctx, templateID)
-	}
-
-	return s.legacy.NextCredentialID(ctx, templateID)
+	return s.sql.NextCredentialID(ctx, templateID)
 }
 
 func (s *RuntimeStore) CreateCredentialRecord(ctx context.Context, record CredentialRecord) error {
-	if s.sql != nil {
-		return translateSQLError(s.sql.CreateCredentialRecord(ctx, credentialRecordToSQL(record)))
-	}
-
-	return translateRuntimeError(s.legacy.CreateCredentialRecord(ctx, credentialRecordToRuntime(record)))
+	return translateSQLError(s.sql.CreateCredentialRecord(ctx, credentialRecordToSQL(record)))
 }
 
 func (s *RuntimeStore) GetCredentialRecord(ctx context.Context, credentialID string) (CredentialRecord, error) {
-	if s.sql != nil {
-		record, err := s.sql.GetCredentialRecord(ctx, credentialID)
-		if err != nil {
-			return CredentialRecord{}, translateSQLError(err)
-		}
-
-		return credentialRecordFromSQL(record), nil
-	}
-
-	record, err := s.legacy.GetCredentialRecord(ctx, credentialID)
+	record, err := s.sql.GetCredentialRecord(ctx, credentialID)
 	if err != nil {
-		return CredentialRecord{}, translateRuntimeError(err)
+		return CredentialRecord{}, translateSQLError(err)
 	}
 
-	return credentialRecordFromRuntime(record), nil
+	return credentialRecordFromSQL(record), nil
 }
 
 func (s *RuntimeStore) UpdateCredentialStatus(
@@ -177,57 +106,30 @@ func (s *RuntimeStore) UpdateCredentialStatus(
 	statusUpdatedAt time.Time,
 	supersededByCredentialID string,
 ) error {
-	if s.sql != nil {
-		return translateSQLError(
-			s.sql.UpdateCredentialStatus(ctx, credentialID, string(status), statusUpdatedAt, supersededByCredentialID),
-		)
-	}
-
-	return translateRuntimeError(
-		s.legacy.UpdateCredentialStatus(ctx, credentialID, string(status), statusUpdatedAt, supersededByCredentialID),
+	return translateSQLError(
+		s.sql.UpdateCredentialStatus(ctx, credentialID, string(status), statusUpdatedAt, supersededByCredentialID),
 	)
 }
 
 func (s *RuntimeStore) AppendAuditRecord(ctx context.Context, record AuditRecord) error {
-	if s.sql != nil {
-		return translateSQLError(s.sql.AppendAuditRecord(ctx, auditRecordToSQL(record)))
-	}
-
-	return translateRuntimeError(s.legacy.AppendAuditRecord(ctx, auditRecordToRuntime(record)))
+	return translateSQLError(s.sql.AppendAuditRecord(ctx, auditRecordToSQL(record)))
 }
 
 func (s *RuntimeStore) CreateIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error {
-	if s.sql != nil {
-		return translateSQLError(s.sql.CreateIdempotencyRecord(ctx, idempotencyRecordToSQL(record)))
-	}
-
-	return translateRuntimeError(s.legacy.CreateIdempotencyRecord(ctx, idempotencyRecordToRuntime(record)))
+	return translateSQLError(s.sql.CreateIdempotencyRecord(ctx, idempotencyRecordToSQL(record)))
 }
 
 func (s *RuntimeStore) ReserveIdempotencyRecord(ctx context.Context, record IdempotencyRecord) (IdempotencyReservationResult, error) {
-	if s.sql != nil {
-		result, err := s.sql.ReserveIdempotencyRecord(ctx, idempotencyRecordToSQL(record))
-		if err != nil {
-			return IdempotencyReservationResult{}, translateSQLError(err)
-		}
-
-		return idempotencyReservationResultFromSQL(result), nil
-	}
-
-	result, err := s.legacy.ReserveIdempotencyRecord(ctx, idempotencyRecordToRuntime(record))
+	result, err := s.sql.ReserveIdempotencyRecord(ctx, idempotencyRecordToSQL(record))
 	if err != nil {
-		return IdempotencyReservationResult{}, translateRuntimeError(err)
+		return IdempotencyReservationResult{}, translateSQLError(err)
 	}
 
-	return idempotencyReservationResultFromRuntime(result), nil
+	return idempotencyReservationResultFromSQL(result), nil
 }
 
 func (s *RuntimeStore) CompleteIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error {
-	if s.sql != nil {
-		return translateSQLError(s.sql.CompleteIdempotencyRecord(ctx, idempotencyRecordToSQL(record)))
-	}
-
-	return translateRuntimeError(s.legacy.CompleteIdempotencyRecord(ctx, idempotencyRecordToRuntime(record)))
+	return translateSQLError(s.sql.CompleteIdempotencyRecord(ctx, idempotencyRecordToSQL(record)))
 }
 
 func (s *RuntimeStore) ReleaseIdempotencyRecord(
@@ -238,14 +140,8 @@ func (s *RuntimeStore) ReleaseIdempotencyRecord(
 	callerActorType string,
 	idempotencyKey string,
 ) error {
-	if s.sql != nil {
-		return translateSQLError(
-			s.sql.ReleaseIdempotencyRecord(ctx, operation, callerOrganizationID, callerPrincipalID, callerActorType, idempotencyKey),
-		)
-	}
-
-	return translateRuntimeError(
-		s.legacy.ReleaseIdempotencyRecord(ctx, operation, callerOrganizationID, callerPrincipalID, callerActorType, idempotencyKey),
+	return translateSQLError(
+		s.sql.ReleaseIdempotencyRecord(ctx, operation, callerOrganizationID, callerPrincipalID, callerActorType, idempotencyKey),
 	)
 }
 
@@ -257,105 +153,48 @@ func (s *RuntimeStore) GetIdempotencyRecord(
 	callerActorType string,
 	idempotencyKey string,
 ) (IdempotencyRecord, error) {
-	if s.sql != nil {
-		record, err := s.sql.GetIdempotencyRecord(ctx, operation, callerOrganizationID, callerPrincipalID, callerActorType, idempotencyKey)
-		if err != nil {
-			return IdempotencyRecord{}, translateSQLError(err)
-		}
-
-		return idempotencyRecordFromSQL(record), nil
-	}
-
-	record, err := s.legacy.GetIdempotencyRecord(ctx, operation, callerOrganizationID, callerPrincipalID, callerActorType, idempotencyKey)
+	record, err := s.sql.GetIdempotencyRecord(ctx, operation, callerOrganizationID, callerPrincipalID, callerActorType, idempotencyKey)
 	if err != nil {
-		return IdempotencyRecord{}, translateRuntimeError(err)
+		return IdempotencyRecord{}, translateSQLError(err)
 	}
 
-	return idempotencyRecordFromRuntime(record), nil
+	return idempotencyRecordFromSQL(record), nil
 }
 
 func (s *RuntimeStore) SeedIssuerRecord(record IssuerRecord) error {
-	if s.sql != nil {
-		return translateSQLError(s.sql.UpsertIssuerRecord(context.Background(), issuerRecordToSQL(record)))
-	}
-
-	return translateRuntimeError(s.legacy.UpsertIssuerRecord(context.Background(), issuerRecordToRuntime(record)))
+	return translateSQLError(s.sql.UpsertIssuerRecord(context.Background(), issuerRecordToSQL(record)))
 }
 
 func (s *RuntimeStore) DeleteIssuerRecord(issuerID string) error {
-	if s.sql != nil {
-		return translateSQLError(s.sql.DeleteIssuerRecord(context.Background(), issuerID))
-	}
-
-	return translateRuntimeError(s.legacy.DeleteIssuerRecord(context.Background(), issuerID))
+	return translateSQLError(s.sql.DeleteIssuerRecord(context.Background(), issuerID))
 }
 
 func (s *RuntimeStore) AuditRecords() ([]AuditRecord, error) {
-	if s.sql != nil {
-		records, err := s.sql.ListAuditRecords(context.Background())
-		if err != nil {
-			return nil, translateSQLError(err)
-		}
-
-		result := make([]AuditRecord, 0, len(records))
-		for _, record := range records {
-			result = append(result, auditRecordFromSQL(record))
-		}
-
-		return result, nil
-	}
-
-	records, err := s.legacy.ListAuditRecords(context.Background())
+	records, err := s.sql.ListAuditRecords(context.Background())
 	if err != nil {
-		return nil, translateRuntimeError(err)
+		return nil, translateSQLError(err)
 	}
 
 	result := make([]AuditRecord, 0, len(records))
 	for _, record := range records {
-		result = append(result, auditRecordFromRuntime(record))
+		result = append(result, auditRecordFromSQL(record))
 	}
 
 	return result, nil
 }
 
 func (s *RuntimeStore) IdempotencyRecords() ([]IdempotencyRecord, error) {
-	if s.sql != nil {
-		records, err := s.sql.ListIdempotencyRecords(context.Background())
-		if err != nil {
-			return nil, translateSQLError(err)
-		}
-
-		result := make([]IdempotencyRecord, 0, len(records))
-		for _, record := range records {
-			result = append(result, idempotencyRecordFromSQL(record))
-		}
-
-		return result, nil
-	}
-
-	records, err := s.legacy.ListIdempotencyRecords(context.Background())
+	records, err := s.sql.ListIdempotencyRecords(context.Background())
 	if err != nil {
-		return nil, translateRuntimeError(err)
+		return nil, translateSQLError(err)
 	}
 
 	result := make([]IdempotencyRecord, 0, len(records))
 	for _, record := range records {
-		result = append(result, idempotencyRecordFromRuntime(record))
+		result = append(result, idempotencyRecordFromSQL(record))
 	}
 
 	return result, nil
-}
-
-func translateRuntimeError(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	if errors.Is(err, phase1runtime.ErrRecordNotFound) {
-		return ErrRecordNotFound
-	}
-
-	return err
 }
 
 func translateSQLError(err error) error {
@@ -368,39 +207,6 @@ func translateSQLError(err error) error {
 	}
 
 	return err
-}
-
-func normalizeRuntimeMode(mode string) string {
-	normalizedMode := strings.TrimSpace(mode)
-	if normalizedMode == "" {
-		return RuntimeModeSQLPrimary
-	}
-
-	return normalizedMode
-}
-
-func issuerRecordToRuntime(record IssuerRecord) phase1runtime.IssuerRecord {
-	return phase1runtime.IssuerRecord{
-		IssuerID:                  record.IssuerID,
-		DisplayName:               record.DisplayName,
-		TrustState:                record.TrustState,
-		AllowedTemplateIDs:        append([]string(nil), record.AllowedTemplateIDs...),
-		VerificationKeyReferences: append([]string(nil), record.VerificationKeyReferences...),
-		CreatedAt:                 record.CreatedAt,
-		UpdatedAt:                 record.UpdatedAt,
-	}
-}
-
-func issuerRecordFromRuntime(record phase1runtime.IssuerRecord) IssuerRecord {
-	return IssuerRecord{
-		IssuerID:                  record.IssuerID,
-		DisplayName:               record.DisplayName,
-		TrustState:                record.TrustState,
-		AllowedTemplateIDs:        append([]string(nil), record.AllowedTemplateIDs...),
-		VerificationKeyReferences: append([]string(nil), record.VerificationKeyReferences...),
-		CreatedAt:                 record.CreatedAt,
-		UpdatedAt:                 record.UpdatedAt,
-	}
 }
 
 func issuerRecordToSQL(record IssuerRecord) phase1sql.IssuerRecord {
@@ -427,30 +233,6 @@ func issuerRecordFromSQL(record phase1sql.IssuerRecord) IssuerRecord {
 	}
 }
 
-func credentialArtifactToRuntime(record *CredentialArtifact) *phase1runtime.CredentialArtifact {
-	if record == nil {
-		return nil
-	}
-
-	return &phase1runtime.CredentialArtifact{
-		Kind:      record.Kind,
-		MediaType: record.MediaType,
-		Value:     record.Value,
-	}
-}
-
-func credentialArtifactFromRuntime(record *phase1runtime.CredentialArtifact) *CredentialArtifact {
-	if record == nil {
-		return nil
-	}
-
-	return &CredentialArtifact{
-		Kind:      record.Kind,
-		MediaType: record.MediaType,
-		Value:     record.Value,
-	}
-}
-
 func credentialArtifactToSQL(record *CredentialArtifact) *phase1sql.CredentialArtifact {
 	if record == nil {
 		return nil
@@ -472,44 +254,6 @@ func credentialArtifactFromSQL(record *phase1sql.CredentialArtifact) *Credential
 		Kind:      record.Kind,
 		MediaType: record.MediaType,
 		Value:     record.Value,
-	}
-}
-
-func credentialRecordToRuntime(record CredentialRecord) phase1runtime.CredentialRecord {
-	return phase1runtime.CredentialRecord{
-		CredentialID:             record.CredentialID,
-		IssuerID:                 record.IssuerID,
-		TemplateID:               record.TemplateID,
-		SubjectReference:         record.SubjectReference,
-		Claims:                   phase1runtime.KYCClaims(record.Claims),
-		ArtifactDigest:           record.ArtifactDigest,
-		CredentialArtifact:       credentialArtifactToRuntime(record.CredentialArtifact),
-		ArtifactReference:        record.ArtifactReference,
-		Status:                   string(record.Status),
-		StatusReference:          record.StatusReference,
-		IssuedAt:                 record.IssuedAt,
-		ExpiresAt:                record.ExpiresAt,
-		StatusUpdatedAt:          record.StatusUpdatedAt,
-		SupersededByCredentialID: record.SupersededByCredentialID,
-	}
-}
-
-func credentialRecordFromRuntime(record phase1runtime.CredentialRecord) CredentialRecord {
-	return CredentialRecord{
-		CredentialID:             record.CredentialID,
-		IssuerID:                 record.IssuerID,
-		TemplateID:               record.TemplateID,
-		SubjectReference:         record.SubjectReference,
-		Claims:                   KYCClaims(record.Claims),
-		ArtifactDigest:           record.ArtifactDigest,
-		CredentialArtifact:       credentialArtifactFromRuntime(record.CredentialArtifact),
-		ArtifactReference:        record.ArtifactReference,
-		Status:                   CredentialStatus(record.Status),
-		StatusReference:          record.StatusReference,
-		IssuedAt:                 record.IssuedAt,
-		ExpiresAt:                record.ExpiresAt,
-		StatusUpdatedAt:          record.StatusUpdatedAt,
-		SupersededByCredentialID: record.SupersededByCredentialID,
 	}
 }
 
@@ -551,36 +295,6 @@ func credentialRecordFromSQL(record phase1sql.CredentialRecord) CredentialRecord
 	}
 }
 
-func auditRecordToRuntime(record AuditRecord) phase1runtime.AuditRecord {
-	return phase1runtime.AuditRecord{
-		AuditID:        record.AuditID,
-		Actor:          actorToRuntime(record.Actor),
-		Action:         record.Action,
-		ResourceType:   record.ResourceType,
-		ResourceID:     record.ResourceID,
-		RequestID:      record.RequestID,
-		IdempotencyKey: record.IdempotencyKey,
-		Outcome:        record.Outcome,
-		OccurredAt:     record.OccurredAt,
-		ServiceName:    record.ServiceName,
-	}
-}
-
-func auditRecordFromRuntime(record phase1runtime.AuditRecord) AuditRecord {
-	return AuditRecord{
-		AuditID:        record.AuditID,
-		Actor:          actorFromRuntime(record.Actor),
-		Action:         record.Action,
-		ResourceType:   record.ResourceType,
-		ResourceID:     record.ResourceID,
-		RequestID:      record.RequestID,
-		IdempotencyKey: record.IdempotencyKey,
-		Outcome:        record.Outcome,
-		OccurredAt:     record.OccurredAt,
-		ServiceName:    record.ServiceName,
-	}
-}
-
 func auditRecordToSQL(record AuditRecord) phase1sql.AuditRecord {
 	return phase1sql.AuditRecord{
 		AuditID:        record.AuditID,
@@ -608,44 +322,6 @@ func auditRecordFromSQL(record phase1sql.AuditRecord) AuditRecord {
 		Outcome:        record.Outcome,
 		OccurredAt:     record.OccurredAt,
 		ServiceName:    record.ServiceName,
-	}
-}
-
-func idempotencyRecordToRuntime(record IdempotencyRecord) phase1runtime.IdempotencyRecord {
-	return phase1runtime.IdempotencyRecord{
-		Operation:            record.Operation,
-		CallerPrincipalID:    record.CallerPrincipalID,
-		CallerOrganizationID: record.CallerOrganizationID,
-		CallerActorType:      record.CallerActorType,
-		IdempotencyKey:       record.IdempotencyKey,
-		RequestFingerprint:   record.RequestFingerprint,
-		State:                record.State,
-		ResponseStatusCode:   record.ResponseStatusCode,
-		ResourceType:         record.ResourceType,
-		ResourceID:           record.ResourceID,
-		Location:             record.Location,
-		ResponseBody:         append([]byte(nil), record.ResponseBody...),
-		CreatedAt:            record.CreatedAt,
-		UpdatedAt:            record.UpdatedAt,
-	}
-}
-
-func idempotencyRecordFromRuntime(record phase1runtime.IdempotencyRecord) IdempotencyRecord {
-	return IdempotencyRecord{
-		Operation:            record.Operation,
-		CallerPrincipalID:    record.CallerPrincipalID,
-		CallerOrganizationID: record.CallerOrganizationID,
-		CallerActorType:      record.CallerActorType,
-		IdempotencyKey:       record.IdempotencyKey,
-		RequestFingerprint:   record.RequestFingerprint,
-		State:                record.State,
-		ResponseStatusCode:   record.ResponseStatusCode,
-		ResourceType:         record.ResourceType,
-		ResourceID:           record.ResourceID,
-		Location:             record.Location,
-		ResponseBody:         append([]byte(nil), record.ResponseBody...),
-		CreatedAt:            record.CreatedAt,
-		UpdatedAt:            record.UpdatedAt,
 	}
 }
 
@@ -687,37 +363,10 @@ func idempotencyRecordFromSQL(record phase1sql.IdempotencyRecord) IdempotencyRec
 	}
 }
 
-func idempotencyReservationResultFromRuntime(result phase1runtime.IdempotencyReservationResult) IdempotencyReservationResult {
-	return IdempotencyReservationResult{
-		Outcome: result.Outcome,
-		Record:  idempotencyRecordFromRuntime(result.Record),
-	}
-}
-
 func idempotencyReservationResultFromSQL(result phase1sql.IdempotencyReservationResult) IdempotencyReservationResult {
 	return IdempotencyReservationResult{
 		Outcome: result.Outcome,
 		Record:  idempotencyRecordFromSQL(result.Record),
-	}
-}
-
-func actorToRuntime(record authctx.Attribution) phase1runtime.Actor {
-	return phase1runtime.Actor{
-		PrincipalID:             record.PrincipalID,
-		OrganizationID:          record.OrganizationID,
-		ActorType:               string(record.ActorType),
-		Scopes:                  append([]string(nil), record.Scopes...),
-		AuthenticationReference: record.AuthenticationReference,
-	}
-}
-
-func actorFromRuntime(record phase1runtime.Actor) authctx.Attribution {
-	return authctx.Attribution{
-		PrincipalID:             record.PrincipalID,
-		OrganizationID:          record.OrganizationID,
-		ActorType:               authctx.ActorType(record.ActorType),
-		Scopes:                  append([]string(nil), record.Scopes...),
-		AuthenticationReference: record.AuthenticationReference,
 	}
 }
 

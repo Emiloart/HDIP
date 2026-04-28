@@ -30,7 +30,6 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 		RequestTimeout:       time.Second,
 		ReadHeaderTimeout:    time.Second,
 		ShutdownTimeout:      time.Second,
-		Phase1RuntimeMode:    "sql-primary",
 		Phase1DatabaseDriver: "pgx",
 		Phase1DatabaseURL:    "postgres://phase1",
 		BuildVersion:         "dev",
@@ -38,23 +37,6 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected validation error")
-	}
-}
-
-func TestLoadUsesTransitionalStatePathEnvFallback(t *testing.T) {
-	t.Setenv("HDIP_PHASE1_RUNTIME_MODE", "transitional-json")
-	t.Setenv("HDIP_PHASE1_TRANSITIONAL_STATE_PATH", "")
-	t.Setenv("HDIP_PHASE1_STATE_PATH", "")
-	t.Setenv("HDIP_PHASE1_RUNTIME_PATH", "legacy-phase1-state.json")
-	t.Setenv("HDIP_PHASE1_DATABASE_URL", "")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-
-	if cfg.Phase1StatePath != "legacy-phase1-state.json" {
-		t.Fatalf("expected legacy state path fallback, got %q", cfg.Phase1StatePath)
 	}
 }
 
@@ -110,7 +92,6 @@ func TestValidateRejectsSQLPrimaryWithoutDatabaseURL(t *testing.T) {
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
-		Phase1RuntimeMode: "sql-primary",
 		BuildVersion:      "dev",
 	}
 

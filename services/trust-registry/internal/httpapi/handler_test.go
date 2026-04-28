@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
+	phase1sqltest "github.com/Emiloart/HDIP/services/internal/phase1sqltest"
 	"github.com/Emiloart/HDIP/services/trust-registry/internal/config"
 	phase1 "github.com/Emiloart/HDIP/services/trust-registry/internal/phase1"
 )
@@ -17,26 +18,7 @@ import (
 const trustRegistryTestToken = "hydra-trust-runtime-access-token"
 
 func TestHealthHandler(t *testing.T) {
-	handler, err := NewMux(slog.Default(), config.Config{
-		ServiceName:                       "trust-registry",
-		Host:                              "127.0.0.1",
-		Port:                              8083,
-		LogLevel:                          "INFO",
-		RequestTimeout:                    time.Second,
-		ReadHeaderTimeout:                 time.Second,
-		ShutdownTimeout:                   time.Second,
-		Phase1RuntimeMode:                 phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:                   t.TempDir() + "\\trust-phase1-state.json",
-		TrustRuntimeHydraIntrospectionURL: "http://127.0.0.1:4445/admin/oauth2/introspect",
-		TrustRuntimeHydraClientID:         "trust-registry",
-		TrustRuntimeHydraClientSecret:     "trust-runtime-test-secret",
-		TrustRuntimeHydraExpectedClientID: "verifier-api",
-		TrustRuntimeHydraRequiredScope:    "trust.runtime.read",
-		BuildVersion:                      "test",
-	})
-	if err != nil {
-		t.Fatalf("new trust mux: %v", err)
-	}
+	handler := newTestTrustHandler(t, newTrustStoreWithDefaultIssuer(t), staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}})
 
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	recorder := httptest.NewRecorder()
@@ -57,27 +39,8 @@ func TestHealthHandler(t *testing.T) {
 	}
 }
 
-func TestReadyHandlerReportsTransitionalRuntimeMode(t *testing.T) {
-	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
-	if err != nil {
-		t.Fatalf("open trust store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
-
-	handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
-		ServiceName:       "trust-registry",
-		Host:              "127.0.0.1",
-		Port:              8083,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
-		BuildVersion:      "test",
-	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}}))
+func TestReadyHandlerReportsSQLPrimaryRuntimeMode(t *testing.T) {
+	handler := newTestTrustHandler(t, newTrustStoreWithDefaultIssuer(t), staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}})
 
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	recorder := httptest.NewRecorder()
@@ -88,32 +51,13 @@ func TestReadyHandlerReportsTransitionalRuntimeMode(t *testing.T) {
 		t.Fatalf("expected 200, got %d", recorder.Code)
 	}
 
-	if runtimeMode := recorder.Header().Get("X-HDIP-Phase1-Runtime-Mode"); runtimeMode != phase1.RuntimeModeTransitionalJSON {
-		t.Fatalf("expected transitional runtime mode header, got %q", runtimeMode)
+	if runtimeMode := recorder.Header().Get("X-HDIP-Phase1-Runtime-Mode"); runtimeMode != phase1.RuntimeModeSQLPrimary {
+		t.Fatalf("expected sql-primary runtime mode header, got %q", runtimeMode)
 	}
 }
 
 func TestReadyHandlerFailsClosedWhenHydraIntrospectionUnavailable(t *testing.T) {
-	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
-	if err != nil {
-		t.Fatalf("open trust store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
-
-	handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
-		ServiceName:       "trust-registry",
-		Host:              "127.0.0.1",
-		Port:              8083,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
-		BuildVersion:      "test",
-	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{err: ErrInternalAuthUnavailable}))
+	handler := newTestTrustHandler(t, newTrustStoreWithDefaultIssuer(t), staticInternalAuthorizer{err: ErrInternalAuthUnavailable})
 
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	recorder := httptest.NewRecorder()
@@ -135,36 +79,7 @@ func TestReadyHandlerFailsClosedWhenHydraIntrospectionUnavailable(t *testing.T) 
 }
 
 func TestInternalPhase1IssuerTrustHandler(t *testing.T) {
-	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
-	if err != nil {
-		t.Fatalf("open trust store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
-
-	if err := store.SeedIssuerRecord(phase1.IssuerRecord{
-		IssuerID:                  "did:web:issuer.hdip.dev",
-		DisplayName:               "HDIP Passport Issuer",
-		TrustState:                "active",
-		AllowedTemplateIDs:        []string{"hdip-passport-basic"},
-		VerificationKeyReferences: []string{"key:issuer.hdip.dev:2026-04"},
-	}); err != nil {
-		t.Fatalf("seed issuer record: %v", err)
-	}
-
-	handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
-		ServiceName:       "trust-registry",
-		Host:              "127.0.0.1",
-		Port:              8083,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
-		BuildVersion:      "test",
-	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}}))
+	handler := newTestTrustHandler(t, newTrustStoreWithDefaultIssuer(t), staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}})
 
 	request := httptest.NewRequest(http.MethodGet, "/internal/v1/phase1/issuers/did:web:issuer.hdip.dev/trust", nil)
 	request.Header.Set("Authorization", "Bearer "+trustRegistryTestToken)
@@ -187,26 +102,7 @@ func TestInternalPhase1IssuerTrustHandler(t *testing.T) {
 }
 
 func TestInternalPhase1IssuerTrustHandlerReturnsNotFound(t *testing.T) {
-	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
-	if err != nil {
-		t.Fatalf("open trust store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
-
-	handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
-		ServiceName:       "trust-registry",
-		Host:              "127.0.0.1",
-		Port:              8083,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
-		BuildVersion:      "test",
-	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}}))
+	handler := newTestTrustHandler(t, newTrustStore(t), staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}})
 
 	request := httptest.NewRequest(http.MethodGet, "/internal/v1/phase1/issuers/did:web:issuer.hdip.dev/trust", nil)
 	request.Header.Set("Authorization", "Bearer "+trustRegistryTestToken)
@@ -220,26 +116,7 @@ func TestInternalPhase1IssuerTrustHandlerReturnsNotFound(t *testing.T) {
 }
 
 func TestInternalPhase1IssuerTrustHandlerRejectsMissingInternalAuth(t *testing.T) {
-	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
-	if err != nil {
-		t.Fatalf("open trust store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
-
-	handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
-		ServiceName:       "trust-registry",
-		Host:              "127.0.0.1",
-		Port:              8083,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
-		BuildVersion:      "test",
-	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}}))
+	handler := newTestTrustHandler(t, newTrustStore(t), staticInternalAuthorizer{principal: internalPrincipal{ClientID: "verifier-api"}})
 
 	request := httptest.NewRequest(http.MethodGet, "/internal/v1/phase1/issuers/did:web:issuer.hdip.dev/trust", nil)
 	recorder := httptest.NewRecorder()
@@ -252,24 +129,6 @@ func TestInternalPhase1IssuerTrustHandlerRejectsMissingInternalAuth(t *testing.T
 }
 
 func TestInternalPhase1IssuerTrustHandlerAcceptsAuthorizedHydraIdentity(t *testing.T) {
-	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
-	if err != nil {
-		t.Fatalf("open trust store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
-
-	if err := store.SeedIssuerRecord(phase1.IssuerRecord{
-		IssuerID:                  "did:web:issuer.hdip.dev",
-		DisplayName:               "HDIP Passport Issuer",
-		TrustState:                "active",
-		AllowedTemplateIDs:        []string{"hdip-passport-basic"},
-		VerificationKeyReferences: []string{"key:issuer.hdip.dev:2026-04"},
-	}); err != nil {
-		t.Fatalf("seed issuer record: %v", err)
-	}
-
 	introspectionServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"active":true,"client_id":"verifier-api","scope":"trust.runtime.read"}`))
@@ -288,18 +147,7 @@ func TestInternalPhase1IssuerTrustHandlerAcceptsAuthorizedHydraIdentity(t *testi
 		t.Fatalf("new hydra introspection authorizer: %v", err)
 	}
 
-	handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
-		ServiceName:       "trust-registry",
-		Host:              "127.0.0.1",
-		Port:              8083,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
-		BuildVersion:      "test",
-	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, authorizer))
+	handler := newTestTrustHandler(t, newTrustStoreWithDefaultIssuer(t), authorizer)
 
 	request := httptest.NewRequest(http.MethodGet, "/internal/v1/phase1/issuers/did:web:issuer.hdip.dev/trust", nil)
 	request.Header.Set("Authorization", "Bearer "+trustRegistryTestToken)
@@ -337,14 +185,6 @@ func TestInternalPhase1IssuerTrustHandlerRejectsUnauthorizedHydraIdentity(t *tes
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
-			if err != nil {
-				t.Fatalf("open trust store: %v", err)
-			}
-			t.Cleanup(func() {
-				_ = store.Close()
-			})
-
 			introspectionServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(testCase.responseBody))
@@ -363,18 +203,7 @@ func TestInternalPhase1IssuerTrustHandlerRejectsUnauthorizedHydraIdentity(t *tes
 				t.Fatalf("new hydra introspection authorizer: %v", err)
 			}
 
-			handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
-				ServiceName:       "trust-registry",
-				Host:              "127.0.0.1",
-				Port:              8083,
-				LogLevel:          "INFO",
-				RequestTimeout:    time.Second,
-				ReadHeaderTimeout: time.Second,
-				ShutdownTimeout:   time.Second,
-				Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
-				Phase1StatePath:   t.TempDir() + "\\unused-state.json",
-				BuildVersion:      "test",
-			}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, authorizer))
+			handler := newTestTrustHandler(t, newTrustStore(t), authorizer)
 
 			request := httptest.NewRequest(http.MethodGet, "/internal/v1/phase1/issuers/did:web:issuer.hdip.dev/trust", nil)
 			request.Header.Set("Authorization", "Bearer "+trustRegistryTestToken)
@@ -390,14 +219,6 @@ func TestInternalPhase1IssuerTrustHandlerRejectsUnauthorizedHydraIdentity(t *tes
 }
 
 func TestInternalPhase1IssuerTrustHandlerFailsClosedWhenHydraIntrospectionUnavailable(t *testing.T) {
-	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
-	if err != nil {
-		t.Fatalf("open trust store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
-
 	introspectionServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "hydra unavailable", http.StatusServiceUnavailable)
 	}))
@@ -415,18 +236,7 @@ func TestInternalPhase1IssuerTrustHandlerFailsClosedWhenHydraIntrospectionUnavai
 		t.Fatalf("new hydra introspection authorizer: %v", err)
 	}
 
-	handler := newMuxWithPhase1Handler(slog.Default(), config.Config{
-		ServiceName:       "trust-registry",
-		Host:              "127.0.0.1",
-		Port:              8083,
-		LogLevel:          "INFO",
-		RequestTimeout:    time.Second,
-		ReadHeaderTimeout: time.Second,
-		ShutdownTimeout:   time.Second,
-		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:   t.TempDir() + "\\unused-state.json",
-		BuildVersion:      "test",
-	}, newPhase1TrustHandlerWithStoreAndAuthorizer(store, authorizer))
+	handler := newTestTrustHandler(t, newTrustStore(t), authorizer)
 
 	request := httptest.NewRequest(http.MethodGet, "/internal/v1/phase1/issuers/did:web:issuer.hdip.dev/trust", nil)
 	request.Header.Set("Authorization", "Bearer "+trustRegistryTestToken)
@@ -440,13 +250,7 @@ func TestInternalPhase1IssuerTrustHandlerFailsClosedWhenHydraIntrospectionUnavai
 }
 
 func TestInternalPhase1IssuerTrustBootstrapAppliesOwnedRecordsAndAudits(t *testing.T) {
-	store, err := phase1.OpenRuntimeStore(t.TempDir() + "\\trust-phase1-state.json")
-	if err != nil {
-		t.Fatalf("open trust store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
+	store := newTrustStore(t)
 
 	now := time.Date(2026, time.April, 22, 9, 30, 0, 0, time.UTC)
 	result, err := phase1.ApplyBootstrapDocument(context.Background(), store, "trust-bootstrap.json", phase1.BootstrapDocument{
@@ -488,5 +292,51 @@ func TestInternalPhase1IssuerTrustBootstrapAppliesOwnedRecordsAndAudits(t *testi
 
 	if audits[0].Action != "trust-registry.phase1.bootstrap.apply" || audits[0].Actor.PrincipalID != "trust-registry-bootstrap" {
 		t.Fatalf("unexpected audit record: %+v", audits[0])
+	}
+}
+
+func newTestTrustHandler(t *testing.T, store *phase1.RuntimeStore, authorizer internalAuthorizer) http.Handler {
+	t.Helper()
+
+	return newMuxWithPhase1Handler(slog.Default(), testTrustConfig(), newPhase1TrustHandlerWithStoreAndAuthorizer(store, authorizer))
+}
+
+func newTrustStore(t *testing.T) *phase1.RuntimeStore {
+	t.Helper()
+
+	return phase1.NewSQLRuntimeStore(phase1sqltest.OpenSQLiteStore(t))
+}
+
+func newTrustStoreWithDefaultIssuer(t *testing.T) *phase1.RuntimeStore {
+	t.Helper()
+
+	store := newTrustStore(t)
+	if err := store.SeedIssuerRecord(defaultTrustIssuerRecord()); err != nil {
+		t.Fatalf("seed issuer record: %v", err)
+	}
+
+	return store
+}
+
+func defaultTrustIssuerRecord() phase1.IssuerRecord {
+	return phase1.IssuerRecord{
+		IssuerID:                  "did:web:issuer.hdip.dev",
+		DisplayName:               "HDIP Passport Issuer",
+		TrustState:                "active",
+		AllowedTemplateIDs:        []string{"hdip-passport-basic"},
+		VerificationKeyReferences: []string{"key:issuer.hdip.dev:2026-04"},
+	}
+}
+
+func testTrustConfig() config.Config {
+	return config.Config{
+		ServiceName:       "trust-registry",
+		Host:              "127.0.0.1",
+		Port:              8083,
+		LogLevel:          "INFO",
+		RequestTimeout:    time.Second,
+		ReadHeaderTimeout: time.Second,
+		ShutdownTimeout:   time.Second,
+		BuildVersion:      "test",
 	}
 }

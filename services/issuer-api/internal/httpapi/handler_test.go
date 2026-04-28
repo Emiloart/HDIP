@@ -17,6 +17,7 @@ import (
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/testutil"
 	phase1sql "github.com/Emiloart/HDIP/services/internal/phase1sql"
+	phase1sqltest "github.com/Emiloart/HDIP/services/internal/phase1sqltest"
 	"github.com/Emiloart/HDIP/services/issuer-api/internal/config"
 	phase1 "github.com/Emiloart/HDIP/services/issuer-api/internal/phase1"
 )
@@ -43,7 +44,7 @@ func TestHealthHandler(t *testing.T) {
 	}
 }
 
-func TestReadyHandlerReportsTransitionalRuntimeMode(t *testing.T) {
+func TestReadyHandlerReportsSQLPrimaryRuntimeMode(t *testing.T) {
 	handler := newTestIssuerHandler(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -55,8 +56,8 @@ func TestReadyHandlerReportsTransitionalRuntimeMode(t *testing.T) {
 		t.Fatalf("expected 200, got %d", recorder.Code)
 	}
 
-	if runtimeMode := recorder.Header().Get("X-HDIP-Phase1-Runtime-Mode"); runtimeMode != phase1.RuntimeModeTransitionalJSON {
-		t.Fatalf("expected transitional runtime mode header, got %q", runtimeMode)
+	if runtimeMode := recorder.Header().Get("X-HDIP-Phase1-Runtime-Mode"); runtimeMode != phase1.RuntimeModeSQLPrimary {
+		t.Fatalf("expected sql-primary runtime mode header, got %q", runtimeMode)
 	}
 
 	var response httpx.HealthResponse
@@ -726,12 +727,7 @@ func TestPhase1PrimarySQLStoreRoundTrip(t *testing.T) {
 func newTestIssuerHandler(t *testing.T) http.Handler {
 	t.Helper()
 
-	handler, err := NewMux(slog.Default(), testIssuerConfig(t))
-	if err != nil {
-		t.Fatalf("new issuer mux: %v", err)
-	}
-
-	return handler
+	return newTestIssuerHandlerWithStore(t, newIssuerStoreWithDefaults(t))
 }
 
 func newTestIssuerHandlerWithStore(t *testing.T, store *phase1.RuntimeStore) http.Handler {
@@ -743,13 +739,8 @@ func newTestIssuerHandlerWithStore(t *testing.T, store *phase1.RuntimeStore) htt
 func newIssuerStoreWithDefaults(t *testing.T) *phase1.RuntimeStore {
 	t.Helper()
 
-	store, err := phase1.OpenRuntimeStore(filepath.Join(t.TempDir(), "issuer-phase1-state.json"))
-	if err != nil {
-		t.Fatalf("open runtime store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
+	sqlStore := phase1sqltest.OpenSQLiteStore(t)
+	store := phase1.NewSQLRuntimeStore(sqlStore)
 
 	if err := store.SeedIssuerRecord(defaultIssuerRecord()); err != nil {
 		t.Fatalf("seed issuer record: %v", err)
@@ -769,8 +760,6 @@ func testIssuerConfig(t *testing.T) config.Config {
 		RequestTimeout:    time.Second,
 		ReadHeaderTimeout: time.Second,
 		ShutdownTimeout:   time.Second,
-		Phase1RuntimeMode: phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:   filepath.Join(t.TempDir(), "issuer-phase1-state.json"),
 		BuildVersion:      "test",
 	}
 }

@@ -33,7 +33,6 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 		RequestTimeout:                time.Second,
 		ReadHeaderTimeout:             time.Second,
 		ShutdownTimeout:               time.Second,
-		Phase1RuntimeMode:             "sql-primary",
 		Phase1DatabaseDriver:          "pgx",
 		Phase1DatabaseURL:             "postgres://phase1",
 		TrustRegistryBaseURL:          "http://127.0.0.1:8083",
@@ -46,26 +45,6 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected validation error")
-	}
-}
-
-func TestLoadUsesTransitionalStatePathEnvFallback(t *testing.T) {
-	t.Setenv("HDIP_PHASE1_RUNTIME_MODE", "transitional-json")
-	t.Setenv("HDIP_PHASE1_TRANSITIONAL_STATE_PATH", "")
-	t.Setenv("HDIP_PHASE1_STATE_PATH", "")
-	t.Setenv("HDIP_PHASE1_RUNTIME_PATH", "legacy-phase1-state.json")
-	t.Setenv("HDIP_PHASE1_DATABASE_URL", "")
-	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
-	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
-	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-
-	if cfg.Phase1StatePath != "legacy-phase1-state.json" {
-		t.Fatalf("expected legacy state path fallback, got %q", cfg.Phase1StatePath)
 	}
 }
 
@@ -152,7 +131,6 @@ func TestValidateRejectsSQLPrimaryWithoutDatabaseURL(t *testing.T) {
 		RequestTimeout:                time.Second,
 		ReadHeaderTimeout:             time.Second,
 		ShutdownTimeout:               time.Second,
-		Phase1RuntimeMode:             "sql-primary",
 		TrustRegistryBaseURL:          "http://127.0.0.1:8083",
 		TrustRuntimeHydraTokenURL:     "http://127.0.0.1:4444/oauth2/token",
 		TrustRuntimeHydraClientID:     "verifier-api",

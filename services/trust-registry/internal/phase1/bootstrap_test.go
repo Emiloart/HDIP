@@ -8,16 +8,11 @@ import (
 	"time"
 
 	phase1sql "github.com/Emiloart/HDIP/services/internal/phase1sql"
+	phase1sqltest "github.com/Emiloart/HDIP/services/internal/phase1sqltest"
 )
 
 func TestApplyBootstrapFileUpsertsIssuerRecordsAndPreservesCreatedAt(t *testing.T) {
-	store, err := OpenRuntimeStore(filepath.Join(t.TempDir(), "trust-phase1-state.json"))
-	if err != nil {
-		t.Fatalf("open runtime store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
+	store := NewSQLRuntimeStore(phase1sqltest.OpenSQLiteStore(t))
 
 	bootstrapPath := filepath.Join(t.TempDir(), "trust-bootstrap.json")
 	if err := os.WriteFile(bootstrapPath, []byte(`{

@@ -18,6 +18,7 @@ import (
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/testutil"
 	phase1sql "github.com/Emiloart/HDIP/services/internal/phase1sql"
+	phase1sqltest "github.com/Emiloart/HDIP/services/internal/phase1sqltest"
 	"github.com/Emiloart/HDIP/services/verifier-api/internal/config"
 	phase1 "github.com/Emiloart/HDIP/services/verifier-api/internal/phase1"
 )
@@ -54,7 +55,7 @@ func TestHealthHandler(t *testing.T) {
 	}
 }
 
-func TestReadyHandlerReportsTransitionalRuntimeMode(t *testing.T) {
+func TestReadyHandlerReportsSQLPrimaryRuntimeMode(t *testing.T) {
 	handler := newTestVerifierHandlerWithStore(t, newVerifierStoreWithDefaults(t))
 
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -66,8 +67,8 @@ func TestReadyHandlerReportsTransitionalRuntimeMode(t *testing.T) {
 		t.Fatalf("expected 200, got %d", recorder.Code)
 	}
 
-	if runtimeMode := recorder.Header().Get("X-HDIP-Phase1-Runtime-Mode"); runtimeMode != phase1.RuntimeModeTransitionalJSON {
-		t.Fatalf("expected transitional runtime mode header, got %q", runtimeMode)
+	if runtimeMode := recorder.Header().Get("X-HDIP-Phase1-Runtime-Mode"); runtimeMode != phase1.RuntimeModeSQLPrimary {
+		t.Fatalf("expected sql-primary runtime mode header, got %q", runtimeMode)
 	}
 }
 
@@ -1024,12 +1025,7 @@ func TestPhase1PrimarySQLVerificationRoundTrip(t *testing.T) {
 func newTestVerifierHandler(t *testing.T) http.Handler {
 	t.Helper()
 
-	handler, err := NewMux(slog.Default(), testVerifierConfig(t))
-	if err != nil {
-		t.Fatalf("new verifier mux: %v", err)
-	}
-
-	return handler
+	return newTestVerifierHandlerWithStore(t, newVerifierStoreWithDefaults(t))
 }
 
 func newTestVerifierHandlerWithStore(t *testing.T, store *phase1.RuntimeStore) http.Handler {
@@ -1041,13 +1037,8 @@ func newTestVerifierHandlerWithStore(t *testing.T, store *phase1.RuntimeStore) h
 func newVerifierStoreWithDefaults(t *testing.T) *phase1.RuntimeStore {
 	t.Helper()
 
-	store, err := phase1.OpenRuntimeStore(filepath.Join(t.TempDir(), "verifier-phase1-state.json"))
-	if err != nil {
-		t.Fatalf("open runtime store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
+	sqlStore := phase1sqltest.OpenSQLiteStore(t)
+	store := phase1.NewSQLRuntimeStore(sqlStore)
 
 	if err := store.SeedIssuerRecord(defaultVerifierIssuerRecord()); err != nil {
 		t.Fatalf("seed issuer record: %v", err)
@@ -1070,8 +1061,6 @@ func testVerifierConfig(t *testing.T) config.Config {
 		RequestTimeout:                time.Second,
 		ReadHeaderTimeout:             time.Second,
 		ShutdownTimeout:               time.Second,
-		Phase1RuntimeMode:             phase1.RuntimeModeTransitionalJSON,
-		Phase1StatePath:               filepath.Join(t.TempDir(), "verifier-phase1-state.json"),
 		TrustRegistryBaseURL:          "http://127.0.0.1:19083",
 		TrustRuntimeHydraTokenURL:     "http://127.0.0.1:4444/oauth2/token",
 		TrustRuntimeHydraClientID:     "verifier-api",

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,10 +19,8 @@ type Config struct {
 	RequestTimeout                    time.Duration
 	ReadHeaderTimeout                 time.Duration
 	ShutdownTimeout                   time.Duration
-	Phase1RuntimeMode                 string
 	Phase1DatabaseDriver              string
 	Phase1DatabaseURL                 string
-	Phase1StatePath                   string
 	TrustBootstrapPath                string
 	TrustRuntimeHydraIntrospectionURL string
 	TrustRuntimeHydraClientID         string
@@ -62,10 +59,8 @@ func Load() (Config, error) {
 		RequestTimeout:                    requestTimeout,
 		ReadHeaderTimeout:                 readHeaderTimeout,
 		ShutdownTimeout:                   shutdownTimeout,
-		Phase1RuntimeMode:                 getenv("HDIP_PHASE1_RUNTIME_MODE", "sql-primary"),
 		Phase1DatabaseDriver:              getenv("HDIP_PHASE1_DATABASE_DRIVER", "pgx"),
 		Phase1DatabaseURL:                 getenv("HDIP_PHASE1_DATABASE_URL", ""),
-		Phase1StatePath:                   phase1StatePath(),
 		TrustBootstrapPath:                getenv("HDIP_TRUST_REGISTRY_BOOTSTRAP_PATH", ""),
 		TrustRuntimeHydraIntrospectionURL: getenv("HDIP_TRUST_RUNTIME_HYDRA_INTROSPECTION_URL", ""),
 		TrustRuntimeHydraClientID:         getenv("HDIP_TRUST_RUNTIME_HYDRA_INTROSPECTION_CLIENT_ID", ""),
@@ -104,26 +99,11 @@ func (c Config) Validate() error {
 		return errors.New("trust runtime hydra expected client id must be configured")
 	case strings.TrimSpace(c.TrustRuntimeHydraRequiredScope) == "":
 		return errors.New("trust runtime hydra required scope must be configured")
+	case strings.TrimSpace(c.Phase1DatabaseURL) == "":
+		return errors.New("phase1 sql-primary runtime requires HDIP_PHASE1_DATABASE_URL")
+	case strings.TrimSpace(c.TrustBootstrapPath) != "":
+		return errors.New("trust registry bootstrap path must be applied through the phase1sql CLI when the primary sql path is enabled")
 	default:
-		switch strings.TrimSpace(c.Phase1RuntimeMode) {
-		case "", "sql-primary":
-			if strings.TrimSpace(c.Phase1DatabaseURL) == "" {
-				return errors.New("phase1 sql-primary runtime requires HDIP_PHASE1_DATABASE_URL")
-			}
-			if strings.TrimSpace(c.TrustBootstrapPath) != "" {
-				return errors.New("trust registry bootstrap path must be applied through the phase1sql CLI when the primary sql path is enabled")
-			}
-		case "transitional-json":
-			if strings.TrimSpace(c.Phase1StatePath) == "" {
-				return errors.New("transitional-json runtime requires HDIP_PHASE1_TRANSITIONAL_STATE_PATH")
-			}
-			if strings.TrimSpace(c.Phase1DatabaseURL) != "" {
-				return errors.New("transitional-json runtime must not configure HDIP_PHASE1_DATABASE_URL")
-			}
-		default:
-			return fmt.Errorf("phase1 runtime mode must be sql-primary or transitional-json, got %q", c.Phase1RuntimeMode)
-		}
-
 		return nil
 	}
 }
@@ -166,19 +146,4 @@ func getenvDuration(key string, fallback time.Duration) (time.Duration, error) {
 	}
 
 	return parsed, nil
-}
-
-func phase1StatePath() string {
-	if value := strings.TrimSpace(os.Getenv("HDIP_PHASE1_TRANSITIONAL_STATE_PATH")); value != "" {
-		return value
-	}
-	if value := strings.TrimSpace(os.Getenv("HDIP_PHASE1_STATE_PATH")); value != "" {
-		return value
-	}
-
-	return getenv("HDIP_PHASE1_RUNTIME_PATH", defaultPhase1StatePath())
-}
-
-func defaultPhase1StatePath() string {
-	return filepath.Join(os.TempDir(), "hdip-phase1-state.json")
 }

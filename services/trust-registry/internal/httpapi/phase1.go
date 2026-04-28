@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
 	"github.com/Emiloart/HDIP/services/trust-registry/internal/config"
@@ -27,21 +26,14 @@ type issuerTrustPayload struct {
 
 func newPhase1TrustHandler(cfg config.Config) (*phase1TrustHandler, error) {
 	store, err := phase1.OpenStore(phase1.StoreOptions{
-		RuntimeMode:           cfg.Phase1RuntimeMode,
-		DatabaseDriver:        cfg.Phase1DatabaseDriver,
-		DatabaseURL:           cfg.Phase1DatabaseURL,
-		TransitionalStatePath: cfg.Phase1StatePath,
+		DatabaseDriver: cfg.Phase1DatabaseDriver,
+		DatabaseURL:    cfg.Phase1DatabaseURL,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if strings.TrimSpace(cfg.Phase1RuntimeMode) == phase1.RuntimeModeTransitionalJSON {
-		if _, err := phase1.ApplyBootstrapFile(context.Background(), store, cfg.TrustBootstrapPath, time.Now().UTC()); err != nil {
-			_ = store.Close()
-			return nil, err
-		}
-	} else if strings.TrimSpace(cfg.TrustBootstrapPath) != "" {
+	if strings.TrimSpace(cfg.TrustBootstrapPath) != "" {
 		_ = store.Close()
 		return nil, fmt.Errorf("trust registry bootstrap path must be applied through the phase1sql CLI when the primary sql path is enabled")
 	}
