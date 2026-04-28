@@ -297,4 +297,84 @@ describe("createServiceClient", () => {
       decision: "allow",
     });
   });
+
+  it("creates verifier verification requests with attribution and idempotency headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          verificationId: "verification_hdip_001",
+          credentialId: "cred_hdip_passport_basic_001",
+          issuerId: "did:web:issuer.hdip.dev",
+          decision: "allow",
+          reasonCodes: ["credential_active"],
+          evaluatedAt: "2026-04-28T10:20:00Z",
+          credentialStatus: "active",
+        }),
+        {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createVerifierApiClient("http://127.0.0.1:8082", {
+      defaultHeaders: {
+        "X-HDIP-Principal-ID": "verifier_integrator_exchange",
+      },
+    });
+
+    await expect(client.verifyCredential(
+      {
+        policyId: "kyc-passport-basic",
+        credentialId: "cred_hdip_passport_basic_001",
+        credentialArtifact: {
+          kind: "phase1_opaque_artifact",
+          mediaType: "application/vnd.hdip.phase1-opaque-artifact",
+          value: "opaque-artifact:v1:credential",
+        },
+      },
+      { idempotencyKey: "verify-1" },
+    )).resolves.toMatchObject({
+      verificationId: "verification_hdip_001",
+      decision: "allow",
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(init.method).toBe("POST");
+    expect(headers.get("Idempotency-Key")).toBe("verify-1");
+    expect(headers.get("X-HDIP-Principal-ID")).toBe("verifier_integrator_exchange");
+  });
+
+  it("fetches stored verifier results through the typed verifier client", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            verificationId: "verification_hdip_001",
+            credentialId: "cred_hdip_passport_basic_001",
+            issuerId: "did:web:issuer.hdip.dev",
+            decision: "deny",
+            reasonCodes: ["credential_revoked"],
+            evaluatedAt: "2026-04-28T10:20:00Z",
+            credentialStatus: "revoked",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    const client = createVerifierApiClient("http://127.0.0.1:8082");
+
+    await expect(client.verification("verification_hdip_001")).resolves.toMatchObject({
+      verificationId: "verification_hdip_001",
+      decision: "deny",
+      credentialStatus: "revoked",
+    });
+  });
 });

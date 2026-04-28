@@ -10,12 +10,15 @@ import {
   issuanceRequestSchema,
   issuanceResponseSchema,
   issuerProfileSchema,
+  verificationResultSchema,
+  verificationSubmissionRequestSchema,
   verifierPolicyRequestSchema,
   verifierResultSchema,
 } from "./schemas";
 import type {
   CredentialStatusUpdateRequest,
   IssuanceRequest,
+  VerificationSubmissionRequest,
 } from "./schemas";
 
 export class ServiceClientError extends Error {
@@ -272,6 +275,24 @@ export function createVerifierApiClient(baseUrl: string, options: ServiceClientO
         baseUrl,
         `/v1/verifier/results/${encodePathSegment(requestId)}/stub`,
         verifierResultSchema,
+        options,
+      );
+    },
+    verifyCredential(request: VerificationSubmissionRequest, requestOptions?: RequestOptions) {
+      const parsedRequest = verificationSubmissionRequestSchema.parse(request);
+      return requestWithSchema(
+        baseUrl,
+        "/v1/verifier/verifications",
+        verificationResultSchema,
+        options,
+        jsonRequestInit("POST", parsedRequest, requestOptions),
+      );
+    },
+    verification(verificationId: string) {
+      return requestWithSchema(
+        baseUrl,
+        `/v1/verifier/verifications/${encodePathSegment(verificationId)}`,
+        verificationResultSchema,
         options,
       );
     },
