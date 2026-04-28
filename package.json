@@ -10,11 +10,11 @@
     "packages/*"
   ],
   "scripts": {
-    "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "lint": "bash scripts/validate-web.sh lint",
+    "typecheck": "bash scripts/validate-web.sh typecheck",
+    "test": "bash scripts/validate-web.sh test",
     "schema:validate": "node scripts/validate-schemas.mjs",
-    "validate:web": "npm run lint && npm run typecheck && npm run test && npm run schema:validate"
+    "validate:web": "bash scripts/validate-web.sh"
   },
   "devDependencies": {
     "ajv": "^8.18.0",
