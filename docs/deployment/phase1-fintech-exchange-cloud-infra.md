@@ -126,8 +126,17 @@ Service egress:
 
 ### Local
 
-Use local process execution and SQL-backed test helpers.
+Use local process execution, the sandbox runner, or the Phase 1 Docker Compose stack.
 Local execution may remain developer-oriented, but it must not reintroduce runtime JSON fallback as a service mode.
+
+The local Compose stack lives at `infra/phase1/docker-compose.yml`.
+It is packaging only:
+
+- `phase1sql migrate up` is a separate one-shot job
+- `phase1sql bootstrap trust` is a separate one-shot job
+- service containers do not mutate schema during startup
+- `trust-registry` remains private to the Compose network
+- Compose uses `infra/phase1/Dockerfile.services` to build separate runtime images from one shared Go build stage
 
 ### Pilot
 
@@ -163,6 +172,14 @@ Each deployment must verify:
 - `trust-registry /readyz` is healthy
 - suspended issuer path returns verifier `deny`
 - revoked credential path returns verifier `deny`
+
+## Local packaging command
+
+```bash
+docker compose --env-file infra/phase1/.env.example -f infra/phase1/docker-compose.yml up --build
+```
+
+Use `docs/integration/quickstart.md` for the external integrator walkthrough and `docs/runbooks/phase1-sandbox.md` for the automated lifecycle check.
 
 ## Secrets
 

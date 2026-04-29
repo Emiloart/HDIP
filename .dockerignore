@@ -1,0 +1,13 @@
+.git
+.github
+.codex
+node_modules
+**/node_modules
+target
+**/.next
+**/dist
+**/coverage
+*.log
+.env
+.env.*
+!.env.example

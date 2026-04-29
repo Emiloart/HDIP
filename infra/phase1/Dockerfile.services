@@ -1,0 +1,39 @@
+ARG GO_VERSION=1.26
+
+FROM golang:${GO_VERSION}-alpine AS build
+ENV GODEBUG=http2client=0
+WORKDIR /src
+
+COPY . .
+RUN for attempt in 1 2 3; do \
+      timeout 420s sh -c '\
+        CGO_ENABLED=0 go build -trimpath -o /out/phase1sql ./services/internal/phase1sql/cmd/phase1sql && \
+        CGO_ENABLED=0 go build -trimpath -o /out/issuer-api ./services/issuer-api/cmd/issuer-api && \
+        CGO_ENABLED=0 go build -trimpath -o /out/trust-registry ./services/trust-registry/cmd/trust-registry && \
+        CGO_ENABLED=0 go build -trimpath -o /out/verifier-api ./services/verifier-api/cmd/verifier-api' && exit 0; \
+      sleep 5; \
+    done; \
+    exit 1
+
+FROM alpine:3.20 AS runtime-base
+RUN addgroup -S hdip && adduser -S -G hdip hdip
+USER hdip
+
+FROM runtime-base AS phase1sql
+COPY --from=build /out/phase1sql /usr/local/bin/phase1sql
+ENTRYPOINT ["phase1sql"]
+
+FROM runtime-base AS issuer-api
+COPY --from=build /out/issuer-api /usr/local/bin/issuer-api
+EXPOSE 8080
+ENTRYPOINT ["issuer-api"]
+
+FROM runtime-base AS trust-registry
+COPY --from=build /out/trust-registry /usr/local/bin/trust-registry
+EXPOSE 8080
+ENTRYPOINT ["trust-registry"]
+
+FROM runtime-base AS verifier-api
+COPY --from=build /out/verifier-api /usr/local/bin/verifier-api
+EXPOSE 8080
+ENTRYPOINT ["verifier-api"]

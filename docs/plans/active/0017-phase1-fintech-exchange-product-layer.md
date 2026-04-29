@@ -179,3 +179,12 @@ Do not partially implement a credential-ID-only verifier bridge unless a follow-
 - add an opt-in Go E2E test that starts real service processes, uses real HTTP clients, and asserts allow -> revoke -> deny plus audit records and trust enforcement
 - add a non-destructive dry-run path for validation when `HDIP_VALIDATE_PHASE1_SANDBOX=1`
 - do not change API contracts, schemas, handlers, auth models, trust rules, or product UI flows
+
+### Current implementation slice: Local deployment packaging and integrator quickstart
+
+- run the existing sandbox automation against real local PostgreSQL and Hydra dependencies
+- add thin Docker packaging for `issuer-api`, `verifier-api`, `trust-registry`, and `phase1sql`
+- add a local Compose stack with explicit Hydra migration, Hydra client bootstrap, SQL migration, and trust bootstrap jobs
+- keep `trust-registry`, SQL, and Hydra admin paths internal or localhost-bound in local packaging
+- add an external integrator quickstart that proves issue -> allow -> revoke -> deny without manual UI steps
+- do not add public auth, new contracts, wallet flows, proof verification, or new trust decision rules in this slice

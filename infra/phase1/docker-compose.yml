@@ -1,0 +1,190 @@
+services:
+  phase1-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hdip
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hdip_sandbox_password}
+      POSTGRES_DB: hdip_phase1
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - phase1-db-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hdip -d hdip_phase1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  hydra-migrate:
+    image: oryd/hydra:v2.3.0
+    depends_on:
+      phase1-db:
+        condition: service_healthy
+    environment:
+      DSN: postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hydra?sslmode=disable
+      SECRETS_SYSTEM: ${HYDRA_SYSTEM_SECRET:-hdip_sandbox_system_secret_32_bytes}
+    command: ["migrate", "sql", "up", "-e", "--yes"]
+    restart: "no"
+
+  hydra:
+    image: oryd/hydra:v2.3.0
+    depends_on:
+      hydra-migrate:
+        condition: service_completed_successfully
+    environment:
+      DSN: postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hydra?sslmode=disable
+      SECRETS_SYSTEM: ${HYDRA_SYSTEM_SECRET:-hdip_sandbox_system_secret_32_bytes}
+      URLS_SELF_ISSUER: http://127.0.0.1:4444
+      URLS_LOGIN: http://127.0.0.1:3000/login
+      URLS_CONSENT: http://127.0.0.1:3000/consent
+      SERVE_PUBLIC_PORT: 4444
+      SERVE_ADMIN_PORT: 4445
+    command: ["serve", "all", "--dev"]
+    ports:
+      - "127.0.0.1:4444:4444"
+      - "127.0.0.1:4445:4445"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4444/health/ready >/dev/null && wget -qO- http://127.0.0.1:4445/health/ready >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  hydra-clients:
+    image: oryd/hydra:v2.3.0
+    depends_on:
+      hydra:
+        condition: service_healthy
+    environment:
+      VERIFIER_TRUST_CLIENT_ID: ${VERIFIER_TRUST_CLIENT_ID:-verifier-api}
+      VERIFIER_TRUST_CLIENT_SECRET: ${VERIFIER_TRUST_CLIENT_SECRET:-verifier-runtime-secret}
+      TRUST_REGISTRY_INTROSPECTION_CLIENT_ID: ${TRUST_REGISTRY_INTROSPECTION_CLIENT_ID:-trust-registry}
+      TRUST_REGISTRY_INTROSPECTION_CLIENT_SECRET: ${TRUST_REGISTRY_INTROSPECTION_CLIENT_SECRET:-trust-registry-introspection-secret}
+      TRUST_RUNTIME_SCOPE: ${TRUST_RUNTIME_SCOPE:-trust.runtime.read}
+    volumes:
+      - ./hydra/bootstrap-clients.sh:/usr/local/bin/bootstrap-clients.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/bootstrap-clients.sh"]
+    restart: "no"
+
+  phase1sql-migrate:
+    build:
+      context: ../..
+      dockerfile: infra/phase1/Dockerfile.services
+      target: phase1sql
+      network: host
+    depends_on:
+      phase1-db:
+        condition: service_healthy
+    command:
+      - migrate
+      - up
+      - --driver
+      - pgx
+      - --dsn
+      - postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hdip_phase1?sslmode=disable
+    restart: "no"
+
+  phase1sql-bootstrap-trust:
+    build:
+      context: ../..
+      dockerfile: infra/phase1/Dockerfile.services
+      target: phase1sql
+      network: host
+    depends_on:
+      phase1sql-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./trust-bootstrap.json:/config/trust-bootstrap.json:ro
+    command:
+      - bootstrap
+      - trust
+      - --driver
+      - pgx
+      - --dsn
+      - postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hdip_phase1?sslmode=disable
+      - --file
+      - /config/trust-bootstrap.json
+    restart: "no"
+
+  trust-registry:
+    build:
+      context: ../..
+      dockerfile: infra/phase1/Dockerfile.services
+      target: trust-registry
+      network: host
+    depends_on:
+      phase1sql-bootstrap-trust:
+        condition: service_completed_successfully
+      hydra-clients:
+        condition: service_completed_successfully
+    environment:
+      HDIP_HOST: 0.0.0.0
+      HDIP_PORT: 8080
+      HDIP_PHASE1_DATABASE_DRIVER: pgx
+      HDIP_PHASE1_DATABASE_URL: postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hdip_phase1?sslmode=disable
+      HDIP_TRUST_RUNTIME_HYDRA_INTROSPECTION_URL: http://hydra:4445/admin/oauth2/introspect
+      HDIP_TRUST_RUNTIME_HYDRA_INTROSPECTION_CLIENT_ID: ${TRUST_REGISTRY_INTROSPECTION_CLIENT_ID:-trust-registry}
+      HDIP_TRUST_RUNTIME_HYDRA_INTROSPECTION_CLIENT_SECRET: ${TRUST_REGISTRY_INTROSPECTION_CLIENT_SECRET:-trust-registry-introspection-secret}
+      HDIP_TRUST_RUNTIME_HYDRA_EXPECTED_CLIENT_ID: ${VERIFIER_TRUST_CLIENT_ID:-verifier-api}
+      HDIP_TRUST_RUNTIME_HYDRA_REQUIRED_SCOPE: ${TRUST_RUNTIME_SCOPE:-trust.runtime.read}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  issuer-api:
+    build:
+      context: ../..
+      dockerfile: infra/phase1/Dockerfile.services
+      target: issuer-api
+      network: host
+    depends_on:
+      phase1sql-bootstrap-trust:
+        condition: service_completed_successfully
+    environment:
+      HDIP_HOST: 0.0.0.0
+      HDIP_PORT: 8080
+      HDIP_PHASE1_DATABASE_DRIVER: pgx
+      HDIP_PHASE1_DATABASE_URL: postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hdip_phase1?sslmode=disable
+    ports:
+      - "127.0.0.1:18081:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  verifier-api:
+    build:
+      context: ../..
+      dockerfile: infra/phase1/Dockerfile.services
+      target: verifier-api
+      network: host
+    depends_on:
+      phase1sql-bootstrap-trust:
+        condition: service_completed_successfully
+      hydra-clients:
+        condition: service_completed_successfully
+      trust-registry:
+        condition: service_healthy
+    environment:
+      HDIP_HOST: 0.0.0.0
+      HDIP_PORT: 8080
+      HDIP_PHASE1_DATABASE_DRIVER: pgx
+      HDIP_PHASE1_DATABASE_URL: postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hdip_phase1?sslmode=disable
+      HDIP_TRUST_REGISTRY_BASE_URL: http://trust-registry:8080
+      HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL: http://hydra:4444/oauth2/token
+      HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID: ${VERIFIER_TRUST_CLIENT_ID:-verifier-api}
+      HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET: ${VERIFIER_TRUST_CLIENT_SECRET:-verifier-runtime-secret}
+      HDIP_TRUST_RUNTIME_HYDRA_SCOPE: ${TRUST_RUNTIME_SCOPE:-trust.runtime.read}
+    ports:
+      - "127.0.0.1:18082:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  phase1-db-data:

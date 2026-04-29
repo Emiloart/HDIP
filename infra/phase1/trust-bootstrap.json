@@ -1,0 +1,11 @@
+{
+  "issuers": [
+    {
+      "issuerId": "did:web:issuer.hdip.dev",
+      "displayName": "HDIP Sandbox Issuer",
+      "trustState": "active",
+      "allowedTemplateIds": ["hdip-passport-basic"],
+      "verificationKeyReferences": ["phase1-opaque-artifact-reference"]
+    }
+  ]
+}

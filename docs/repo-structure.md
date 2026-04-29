@@ -7,8 +7,9 @@ If the repository structure changes, this file must be updated in the same chang
 
 ## Current state
 
-The repository is in foundation scaffolding.
-Governance is in place, the first executable baseline is landed, and the issuer/verifier surfaces now include deterministic stub flow endpoints built on the foundation contracts.
+The repository is in Phase 1 product hardening.
+Governance, foundation scaffolding, contract parity, deterministic issuer/verifier application logic, SQL-primary persistence, Hydra-backed internal trust reads, console shells, transfer bridge, sandbox automation, and local Phase 1 deployment packaging are in place.
+Wallet flows, selective disclosure, proof verification, public production auth, and multi-region production infrastructure remain deferred.
 
 ## Ownership model
 
@@ -96,6 +97,17 @@ Reserved for later slices:
 - `services/risk-fraud/`
 
 Services are expected to be implemented primarily in Go with explicit contracts and isolated trust boundaries.
+
+## Infrastructure assets
+
+Current Phase 1 assets:
+
+- `infra/phase1/docker-compose.yml` for local Phase 1 packaging
+- `infra/phase1/.env.example` for local-only Compose defaults
+- `infra/phase1/trust-bootstrap.json` for sandbox issuer trust bootstrap
+- `infra/phase1/postgres/init/` for local database initialization
+
+Infrastructure assets may orchestrate deployment order but must not own product behavior, trust decisions, credential semantics, or hidden auth bypasses.
 
 ## Security-critical core
 

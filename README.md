@@ -5,8 +5,9 @@ Users hold portable credentials and selective disclosure proofs, while issuers, 
 
 ## Current phase
 
-This repository has moved past governance-only bootstrap into the executable foundation slice.
-The Rust core crates, Go service skeletons, web shells, shared packages, schemas, validation wiring, and the first deterministic stub issuer/verifier flow are in place, while real issuance and verification logic remain intentionally deferred.
+This repository is in Phase 1 product hardening for the reusable KYC credential and verifier API loop.
+Governance, foundation scaffolding, contract parity, deterministic issuer/verifier application logic, SQL-primary persistence, Hydra-backed internal trust reads, console shells, transfer bridge, sandbox automation, and local Docker Compose packaging are in place.
+Wallet flows, selective disclosure, proof verification, public production auth, and multi-region production infrastructure remain intentionally deferred.
 
 ## Working agreements
 
@@ -22,6 +23,10 @@ Current foundation validation commands:
 - `bash scripts/check-governance.sh`
 - `bash scripts/check-no-secrets.sh`
 - `bash scripts/validate.sh`
+
+## Phase 1 local quickstart
+
+Use [`docs/integration/quickstart.md`](docs/integration/quickstart.md) to run the local Docker Compose stack and prove issue -> allow -> revoke -> deny.
 
 ## Environment note
 
