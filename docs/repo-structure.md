@@ -45,6 +45,7 @@ The intended long-term responsibility split is:
 - `docs/plans/`: active and archived execution plans
 - `docs/privacy/`: privacy constraints and data-handling rules
 - `docs/product/`: product-surface flows and UX requirements
+- `docs/runbooks/`: operational and sandbox execution runbooks
 - `docs/standards/`: standards registry and interoperability constraints
 - `docs/threat-model/`: full threat models and threat deltas
 

@@ -63,6 +63,9 @@ Current accepted docs and workspace files indicate:
 - SQL-primary Phase 1 persistence and a `phase1sql` migration/bootstrap lifecycle are governed by ADR 0010
 - Hydra client credentials plus introspection are governed for internal verifier-to-trust-registry runtime reads
 - public issuer/verifier operator auth remains a service-edge attribution boundary and is not yet a production auth rollout
+- issuer and verifier consoles now support a temporary copy/paste verifier transfer payload around the accepted opaque `credentialArtifact`
+- the sandbox runbook documents the first create -> verify allow -> revoke -> verify deny pilot loop
+- `scripts/phase1-sandbox.sh` and the opt-in `services/e2e` test prove the same loop programmatically without changing contracts or service logic
 
 This plan treats those facts as the current baseline.
 
@@ -162,3 +165,17 @@ Do not partially implement a credential-ID-only verifier bridge unless a follow-
   - revoke credential
   - verifier API returns `deny`
   - suspended issuer returns `deny`
+
+### Current implementation slice: Sandbox integration loop
+
+- add issuer-console copy action for a verifier transfer payload that carries `credentialId` plus the opaque `credentialArtifact`
+- teach verifier-console to accept that transfer payload while preserving the existing verifier API request contract
+- document the local sandbox runbook for fintech/exchange integrators
+- keep credential-ID-only, QR, short-token resolver, wallet, proof, and signed artifact behavior deferred
+
+### Current implementation slice: Sandbox automation and E2E smoke test
+
+- add a single-command `scripts/phase1-sandbox.sh` runner for migrate, trust bootstrap, service startup, issuance, verification, revocation, and suspended-issuer deny checks
+- add an opt-in Go E2E test that starts real service processes, uses real HTTP clients, and asserts allow -> revoke -> deny plus audit records and trust enforcement
+- add a non-destructive dry-run path for validation when `HDIP_VALIDATE_PHASE1_SANDBOX=1`
+- do not change API contracts, schemas, handlers, auth models, trust rules, or product UI flows

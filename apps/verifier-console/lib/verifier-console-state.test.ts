@@ -39,6 +39,48 @@ describe("verifier console state helpers", () => {
     });
   });
 
+  it("creates a verification request from an issuer-console verifier transfer payload", () => {
+    const request = createVerificationRequest({
+      ...defaultVerifyCredentialFormState(),
+      credentialArtifact: JSON.stringify({
+        kind: "hdip_phase1_verifier_transfer",
+        credentialId: "cred_hdip_passport_basic_001",
+        credentialArtifact: {
+          kind: "phase1_opaque_artifact",
+          mediaType: "application/vnd.hdip.phase1-opaque-artifact",
+          value: "opaque-artifact:v1:credential",
+        },
+      }),
+    });
+
+    expect(request).toEqual({
+      policyId: "kyc-passport-basic",
+      credentialId: "cred_hdip_passport_basic_001",
+      credentialArtifact: {
+        kind: "phase1_opaque_artifact",
+        mediaType: "application/vnd.hdip.phase1-opaque-artifact",
+        value: "opaque-artifact:v1:credential",
+      },
+    });
+  });
+
+  it("rejects mismatched credential IDs between field and transfer payload", () => {
+    expect(() =>
+      createVerificationRequest({
+        credentialId: "cred_other",
+        credentialArtifact: JSON.stringify({
+          kind: "hdip_phase1_verifier_transfer",
+          credentialId: "cred_hdip_passport_basic_001",
+          credentialArtifact: {
+            kind: "phase1_opaque_artifact",
+            mediaType: "application/vnd.hdip.phase1-opaque-artifact",
+            value: "opaque-artifact:v1:credential",
+          },
+        }),
+      }),
+    ).toThrow("credentialId does not match");
+  });
+
   it("rejects credential-id-only verification attempts", () => {
     expect(() =>
       createVerificationRequest({
@@ -52,6 +94,15 @@ describe("verifier console state helpers", () => {
     expect(() => parseCredentialArtifact('{"kind":"wrong"}')).toThrow(
       "credentialArtifact JSON must match",
     );
+  });
+
+  it("rejects malformed verifier transfer payloads", () => {
+    expect(() =>
+      parseCredentialArtifact(JSON.stringify({
+        kind: "hdip_phase1_verifier_transfer",
+        credentialId: "cred_hdip_passport_basic_001",
+      })),
+    ).toThrow("verifier transfer payload must include");
   });
 
   it("formats typed service errors and generates idempotency keys", () => {

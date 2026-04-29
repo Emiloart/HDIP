@@ -66,6 +66,12 @@ button:disabled {
   gap: 8px;
 }
 
+.panel-heading p {
+  color: #486768;
+  line-height: 1.6;
+  margin: 0;
+}
+
 .eyebrow {
   color: #486768;
   font-size: 12px;

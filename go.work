@@ -2,6 +2,7 @@ go 1.26
 
 use (
 	./packages/go/foundation
+	./services/e2e
 	./services/internal/phase1sql
 	./services/internal/phase1sqltest
 	./services/issuer-api

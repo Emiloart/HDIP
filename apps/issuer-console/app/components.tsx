@@ -18,6 +18,7 @@ import {
   mergeRecentCredentials,
   recentCredentialStorageKey,
   serviceErrorMessage,
+  stringifyVerifierTransferPayload,
   toRecentCredential,
   type CreateCredentialFormState,
   type RecentCredential,
@@ -139,15 +140,24 @@ export function CreateCredentialWorkflow() {
 }
 
 function CredentialCreatedSummary(props: { response: IssuanceResponse }) {
-  const artifact = JSON.stringify(props.response.credentialArtifact);
+  const artifact = JSON.stringify(props.response.credentialArtifact, null, 2);
+  const verifierPayload = stringifyVerifierTransferPayload(props.response);
 
   async function copyArtifact() {
     await navigator.clipboard.writeText(artifact);
   }
 
+  async function copyVerifierPayload() {
+    await navigator.clipboard.writeText(verifierPayload);
+  }
+
   return (
     <section className="result-panel" aria-label="Created credential">
       <h2>Credential created</h2>
+      <p className="helper-copy">
+        Copy the verifier transfer payload into the verifier console to complete the Phase 1 sandbox loop.
+        It contains the opaque artifact required by the current verifier contract.
+      </p>
       <dl className="detail-grid">
         <div>
           <dt>Credential ID</dt>
@@ -166,8 +176,16 @@ function CredentialCreatedSummary(props: { response: IssuanceResponse }) {
           <dd>{props.response.statusReference}</dd>
         </div>
       </dl>
-      <textarea readOnly value={artifact} aria-label="Opaque credential artifact" />
+      <label>
+        Verifier transfer payload
+        <textarea readOnly value={verifierPayload} aria-label="Verifier transfer payload" />
+      </label>
+      <details>
+        <summary>Show artifact only</summary>
+        <textarea readOnly value={artifact} aria-label="Opaque credential artifact" />
+      </details>
       <div className="button-row">
+        <button type="button" onClick={copyVerifierPayload}>Copy verifier payload</button>
         <button type="button" onClick={copyArtifact}>Copy artifact</button>
         <Link className="button-link" href={`/credentials/${encodeURIComponent(props.response.credentialId)}`}>
           Open detail
@@ -354,11 +372,23 @@ export function CredentialDetailWorkflow(props: { credentialId: string }) {
 function CredentialDetail(props: { record: CredentialRecord }) {
   const artifact = props.record.credentialArtifact === undefined
     ? null
-    : JSON.stringify(props.record.credentialArtifact);
+    : JSON.stringify(props.record.credentialArtifact, null, 2);
+  const verifierPayload = props.record.credentialArtifact === undefined
+    ? null
+    : stringifyVerifierTransferPayload({
+      credentialId: props.record.credentialId,
+      credentialArtifact: props.record.credentialArtifact,
+    });
 
   async function copyArtifact() {
     if (artifact !== null) {
       await navigator.clipboard.writeText(artifact);
+    }
+  }
+
+  async function copyVerifierPayload() {
+    if (verifierPayload !== null) {
+      await navigator.clipboard.writeText(verifierPayload);
     }
   }
 
@@ -398,10 +428,24 @@ function CredentialDetail(props: { record: CredentialRecord }) {
           <dd>{props.record.artifactDigest}</dd>
         </div>
       </dl>
-      {artifact !== null ? (
+      {artifact !== null && verifierPayload !== null ? (
         <>
-          <textarea readOnly value={artifact} aria-label="Opaque credential artifact" />
-          <button type="button" onClick={copyArtifact}>Copy artifact</button>
+          <p className="helper-copy">
+            Use the verifier transfer payload for the temporary user bridge.
+            The opaque artifact remains non-cryptographic Phase 1 material.
+          </p>
+          <label>
+            Verifier transfer payload
+            <textarea readOnly value={verifierPayload} aria-label="Verifier transfer payload" />
+          </label>
+          <details>
+            <summary>Show artifact only</summary>
+            <textarea readOnly value={artifact} aria-label="Opaque credential artifact" />
+          </details>
+          <div className="button-row">
+            <button type="button" onClick={copyVerifierPayload}>Copy verifier payload</button>
+            <button type="button" onClick={copyArtifact}>Copy artifact</button>
+          </div>
         </>
       ) : null}
     </section>

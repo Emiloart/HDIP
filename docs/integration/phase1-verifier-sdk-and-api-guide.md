@@ -168,6 +168,20 @@ curl -sS https://verifier-api.example.com/v1/verifier/verifications \
 6. `allow` continues onboarding.
 7. `deny` routes to manual KYC or rejection according to partner policy.
 
+## Sandbox runbook
+
+Use `docs/runbooks/phase1-sandbox.md` for the first local integration loop:
+
+- create a credential in issuer console
+- copy the verifier transfer payload
+- paste it into verifier console
+- confirm `allow`
+- revoke the credential
+- verify again and confirm `deny`
+
+The verifier transfer payload is a console bridge around the existing `credentialArtifact` contract.
+It is not a new public API contract and must not be treated as a signed credential.
+
 ## Errors
 
 The SDK must expose at least:

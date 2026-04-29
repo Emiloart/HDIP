@@ -71,8 +71,8 @@ Success state:
 - show status `active`
 - show `expiresAt`
 - show `statusReference`
-- show the opaque `credentialArtifact`
-- provide a copy action for the artifact
+- show the verifier transfer payload containing `credentialId` and the opaque `credentialArtifact`
+- provide copy actions for both the transfer payload and artifact-only fallback
 - reserve QR rendering for the temporary bridge slice
 
 ### 2. Credential lookup
@@ -142,7 +142,8 @@ Do not display broad audit logs or raw audit payloads until a dedicated audit ac
 Phase 1 has no wallet.
 The issuer console therefore supports a temporary bridge:
 
-- copy the opaque `credentialArtifact`
+- copy the verifier transfer payload containing the opaque `credentialArtifact`
+- copy the artifact-only fallback for lower-level API testing
 - later QR-encode the exact same artifact payload
 
 The bridge must not claim:
@@ -155,6 +156,9 @@ The bridge must not claim:
 
 The current trusted verifier input is the opaque `credentialArtifact`.
 `credentialId` is useful for support and traceability, but it is not enough by itself under the accepted Phase 1 verifier contract.
+
+The verifier transfer payload is a console convenience only.
+It does not replace the canonical verifier API request contract.
 
 ## Flow summary
 

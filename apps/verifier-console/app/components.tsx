@@ -48,10 +48,13 @@ export function VerifyCredentialWorkflow() {
       <div className="panel-heading">
         <p className="eyebrow">Verifier operations</p>
         <h1>Verify credential</h1>
+        <p>
+          Paste the verifier transfer payload copied from issuer console, or paste the opaque artifact and optional credential ID separately.
+        </p>
       </div>
       <form className="verify-form" onSubmit={onSubmit}>
         <label>
-          Credential ID
+          Credential ID optional
           <input
             value={form.credentialId}
             onChange={(event) => setField("credentialId", event.target.value)}
@@ -59,11 +62,11 @@ export function VerifyCredentialWorkflow() {
           />
         </label>
         <label>
-          Credential artifact
+          Credential artifact or verifier transfer payload
           <textarea
             value={form.credentialArtifact}
             onChange={(event) => setField("credentialArtifact", event.target.value)}
-            placeholder='{"kind":"phase1_opaque_artifact","mediaType":"application/vnd.hdip.phase1-opaque-artifact","value":"opaque-artifact:v1:..."}'
+            placeholder='{"kind":"hdip_phase1_verifier_transfer","credentialId":"cred_...","credentialArtifact":{"kind":"phase1_opaque_artifact","mediaType":"application/vnd.hdip.phase1-opaque-artifact","value":"opaque-artifact:v1:..."}}'
             required
           />
         </label>
@@ -86,9 +89,27 @@ function VerificationResultView(props: { result: VerificationResult }) {
           <dt>Verification ID</dt>
           <dd>{props.result.verificationId}</dd>
         </div>
+        {props.result.credentialId !== undefined ? (
+          <div>
+            <dt>Credential ID</dt>
+            <dd>{props.result.credentialId}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>Credential status</dt>
+          <dd>{props.result.credentialStatus}</dd>
+        </div>
+        <div>
+          <dt>Issuer ID</dt>
+          <dd>{props.result.issuerId}</dd>
+        </div>
         <div>
           <dt>Evaluated</dt>
           <dd>{formatDateTime(props.result.evaluatedAt)}</dd>
+        </div>
+        <div>
+          <dt>Reason codes</dt>
+          <dd>{props.result.reasonCodes.join(", ")}</dd>
         </div>
       </dl>
     </section>

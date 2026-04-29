@@ -1,6 +1,7 @@
 import type {
   CredentialRecord,
   CredentialStatusUpdateRequest,
+  IssuanceResponse,
   IssuanceRequest,
   ServiceClientError,
 } from "@hdip/api-client";
@@ -26,6 +27,13 @@ export type RecentCredential = {
 export type StatusAction = "revoked" | "superseded";
 
 export const recentCredentialStorageKey = "hdip.issuer-console.recent-credentials";
+export const verifierTransferPayloadKind = "hdip_phase1_verifier_transfer";
+
+export type VerifierTransferPayload = {
+  kind: typeof verifierTransferPayloadKind;
+  credentialId: string;
+  credentialArtifact: IssuanceResponse["credentialArtifact"];
+};
 
 export function defaultCreateCredentialFormState(): CreateCredentialFormState {
   const now = new Date();
@@ -101,6 +109,22 @@ export function mergeRecentCredentials(
   ].slice(0, 8);
 }
 
+export function verifierTransferPayload(
+  record: Pick<IssuanceResponseLike, "credentialId" | "credentialArtifact">,
+): VerifierTransferPayload {
+  return {
+    kind: verifierTransferPayloadKind,
+    credentialId: record.credentialId,
+    credentialArtifact: record.credentialArtifact,
+  };
+}
+
+export function stringifyVerifierTransferPayload(
+  record: Pick<IssuanceResponseLike, "credentialId" | "credentialArtifact">,
+) {
+  return JSON.stringify(verifierTransferPayload(record), null, 2);
+}
+
 export function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("en", {
     dateStyle: "medium",
@@ -147,3 +171,8 @@ function toDateTimeLocalValue(value: Date) {
   const offsetMs = value.getTimezoneOffset() * 60_000;
   return new Date(value.getTime() - offsetMs).toISOString().slice(0, 16);
 }
+
+type IssuanceResponseLike = {
+  credentialId: string;
+  credentialArtifact: IssuanceResponse["credentialArtifact"];
+};

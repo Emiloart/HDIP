@@ -8,6 +8,8 @@ import {
   idempotencyKey,
   mergeRecentCredentials,
   serviceErrorMessage,
+  stringifyVerifierTransferPayload,
+  verifierTransferPayload,
 } from "./issuer-console-state";
 
 describe("issuer console state helpers", () => {
@@ -124,6 +126,27 @@ describe("issuer console state helpers", () => {
     expect(merged).toHaveLength(8);
     expect(merged[0]).toMatchObject({ credentialId: "cred_3", status: "revoked" });
     expect(merged.filter((credential) => credential.credentialId === "cred_3")).toHaveLength(1);
+  });
+
+  it("builds the temporary verifier transfer payload without changing contracts", () => {
+    const credential = {
+      credentialId: "cred_hdip_passport_basic_001",
+      credentialArtifact: {
+        kind: "phase1_opaque_artifact" as const,
+        mediaType: "application/vnd.hdip.phase1-opaque-artifact" as const,
+        value: "opaque-artifact:v1:credential",
+      },
+    };
+
+    expect(verifierTransferPayload(credential)).toEqual({
+      kind: "hdip_phase1_verifier_transfer",
+      credentialId: "cred_hdip_passport_basic_001",
+      credentialArtifact: credential.credentialArtifact,
+    });
+    expect(JSON.parse(stringifyVerifierTransferPayload(credential))).toMatchObject({
+      kind: "hdip_phase1_verifier_transfer",
+      credentialId: "cred_hdip_passport_basic_001",
+    });
   });
 
   it("formats typed service errors and generates deterministic-key prefixes", () => {
