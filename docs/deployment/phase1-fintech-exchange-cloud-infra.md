@@ -158,7 +158,7 @@ Deferred:
 - multi-region SQL topology
 - separate audit store
 - managed secret rotation automation beyond first-pilot controls
-- full public OAuth/OIDC onboarding for issuer and verifier operators
+- self-service public OAuth/OIDC onboarding for issuer and verifier operators
 
 ## Readiness gates
 
@@ -168,6 +168,8 @@ Each deployment must verify:
 - trust bootstrap exists
 - Hydra token acquisition works for `verifier-api`
 - Hydra introspection works for `trust-registry`
+- Hydra public issuer and verifier client credentials are provisioned
+- public-auth smoke validation passes
 - `issuer-api /readyz` is healthy
 - `verifier-api /readyz` is healthy
 - `trust-registry /readyz` is healthy
@@ -181,6 +183,7 @@ docker compose --env-file infra/phase1/.env.example -f infra/phase1/docker-compo
 ```
 
 Use `docs/integration/quickstart.md` for the external integrator walkthrough and `docs/runbooks/phase1-sandbox.md` for the automated lifecycle check.
+Use `docs/runbooks/phase1-partner-provisioning.md` to provision controlled partner clients and `docs/runbooks/phase1-pilot-readiness.md` before pilot access.
 
 ## Secrets
 
@@ -206,6 +209,7 @@ Minimum pilot telemetry:
 
 - structured service logs
 - request IDs
+- access logs
 - readiness failures
 - verification decision counts by decision and reason code
 - audit append success/failure counts

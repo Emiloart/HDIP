@@ -7,9 +7,9 @@ If the repository structure changes, this file must be updated in the same chang
 
 ## Current state
 
-The repository is in Phase 1 product hardening.
-Governance, foundation scaffolding, contract parity, deterministic issuer/verifier application logic, SQL-primary persistence, Hydra-backed internal trust reads, Hydra-backed public issuer/verifier auth, console shells, transfer bridge, sandbox automation, and local Phase 1 deployment packaging are in place.
-Wallet flows, selective disclosure, proof verification, self-service partner provisioning, and multi-region production infrastructure remain deferred.
+The repository is in Phase 1 pilot hardening.
+Governance, foundation scaffolding, contract parity, deterministic issuer/verifier application logic, SQL-primary persistence, Hydra-backed internal trust reads, Hydra-backed public issuer/verifier auth, console shells, transfer bridge, sandbox automation, local Phase 1 deployment packaging, partner provisioning automation, public-auth smoke validation, and pilot-readiness runbooks are in place.
+Wallet flows, selective disclosure, proof verification, self-service partner provisioning UI, and multi-region production infrastructure remain deferred.
 
 ## Ownership model
 

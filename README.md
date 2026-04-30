@@ -6,8 +6,8 @@ Users hold portable credentials and selective disclosure proofs, while issuers, 
 ## Current phase
 
 This repository is in Phase 1 product hardening for the reusable KYC credential and verifier API loop.
-Governance, foundation scaffolding, contract parity, deterministic issuer/verifier application logic, SQL-primary persistence, Hydra-backed internal trust reads, Hydra-backed public issuer/verifier auth, console shells, transfer bridge, sandbox automation, and local Docker Compose packaging are in place.
-Wallet flows, selective disclosure, proof verification, self-service partner provisioning, and multi-region production infrastructure remain intentionally deferred.
+Governance, foundation scaffolding, contract parity, deterministic issuer/verifier application logic, SQL-primary persistence, Hydra-backed internal trust reads, Hydra-backed public issuer/verifier auth, console shells, transfer bridge, sandbox automation, local Docker Compose packaging, and pilot-readiness runbooks are in place.
+Wallet flows, selective disclosure, proof verification, self-service partner provisioning UI, and multi-region production infrastructure remain intentionally deferred.
 
 ## Working agreements
 
@@ -27,6 +27,7 @@ Current foundation validation commands:
 ## Phase 1 local quickstart
 
 Use [`docs/integration/quickstart.md`](docs/integration/quickstart.md) to run the local Docker Compose stack and prove issue -> allow -> revoke -> deny.
+Use [`docs/runbooks/phase1-pilot-readiness.md`](docs/runbooks/phase1-pilot-readiness.md) before giving access to controlled fintech/exchange pilots.
 
 ## Environment note
 

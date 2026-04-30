@@ -11,7 +11,7 @@ This quickstart lets a fintech or exchange engineer run the HDIP Phase 1 reusabl
 
 This is a sandbox path only.
 It uses Hydra OAuth2 client credentials for packaged local issuer/verifier API access.
-It does not add wallet flows, selective disclosure, proof verification, or production partner provisioning automation.
+It does not add wallet flows, selective disclosure, proof verification, or self-service production partner provisioning.
 
 ## Prerequisites
 
@@ -161,6 +161,20 @@ Expected `decision`:
 
 ```json
 "deny"
+```
+
+## One-command public-auth check
+
+To assert the packaged public-auth path against the running Compose stack:
+
+```bash
+bash scripts/phase1-public-auth-smoke.sh
+```
+
+Expected final line:
+
+```text
+final status: PASS
 ```
 
 ## One-command lifecycle check

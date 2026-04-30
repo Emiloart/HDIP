@@ -1,8 +1,11 @@
 # 0017 Phase 1 Fintech Exchange Product Layer
 
-- Status: active
+- Status: archived
 - Date: 2026-04-28
 - Owners: repository maintainer
+
+Archived note: this plan reflects the product-layer design state at the time it was written.
+Public issuer/verifier auth was later implemented under ADR 0012, and pilot operations are tracked by `docs/plans/active/0019-phase1-pilot-readiness-completion.md`.
 
 ## Objective
 
@@ -37,7 +40,7 @@ The product target is narrow:
 
 ## Affected files, services, or packages
 
-- `docs/plans/active/0017-phase1-fintech-exchange-product-layer.md`
+- `docs/plans/archive/0017-phase1-fintech-exchange-product-layer.md`
 - `docs/product/phase1-issuer-console.md`
 - `docs/integration/phase1-verifier-sdk-and-api-guide.md`
 - `docs/deployment/phase1-fintech-exchange-cloud-infra.md`
@@ -62,7 +65,7 @@ Current accepted docs and workspace files indicate:
 - credential status mutation and idempotency are in scope
 - SQL-primary Phase 1 persistence and a `phase1sql` migration/bootstrap lifecycle are governed by ADR 0010
 - Hydra client credentials plus introspection are governed for internal verifier-to-trust-registry runtime reads
-- public issuer/verifier operator auth remains a service-edge attribution boundary and is not yet a production auth rollout
+- public issuer/verifier auth is implemented under ADR 0012; self-service partner onboarding remains deferred
 - issuer and verifier consoles now support a temporary copy/paste verifier transfer payload around the accepted opaque `credentialArtifact`
 - the sandbox runbook documents the first create -> verify allow -> revoke -> verify deny pilot loop
 - `scripts/phase1-sandbox.sh` and the opt-in `services/e2e` test prove the same loop programmatically without changing contracts or service logic
@@ -99,7 +102,7 @@ A short-token or credential-ID resolver is a later governed slice because it cha
 - The first deployment uses one SQL instance, one Hydra instance, and the three Phase 1 services: `issuer-api`, `verifier-api`, and `trust-registry`.
 - `trust-registry` is not public in the first deployment.
 - `phase1sql migrate up` runs before trust bootstrap and service startup.
-- Public edge protection and partner onboarding controls are deployment responsibilities until public issuer/verifier auth is governed in a later slice.
+- Public edge protection and partner onboarding controls are deployment responsibilities tracked by pilot-readiness runbooks.
 
 ## Risks
 
@@ -187,4 +190,4 @@ Do not partially implement a credential-ID-only verifier bridge unless a follow-
 - add a local Compose stack with explicit Hydra migration, Hydra client bootstrap, SQL migration, and trust bootstrap jobs
 - keep `trust-registry`, SQL, and Hydra admin paths internal or localhost-bound in local packaging
 - add an external integrator quickstart that proves issue -> allow -> revoke -> deny without manual UI steps
-- do not add public auth, new contracts, wallet flows, proof verification, or new trust decision rules in this slice
+- this historical slice did not add public auth, new contracts, wallet flows, proof verification, or new trust decision rules

@@ -132,6 +132,7 @@ go test ./... ./services/e2e
 
 The process-run sandbox uses the deprecated local header attribution path for issuer/verifier public calls.
 Use `docs/integration/quickstart.md` and `infra/phase1/docker-compose.yml` to exercise the packaged Hydra public-auth path.
+Use `scripts/phase1-public-auth-smoke.sh` to assert the packaged Hydra public-auth path without manual curl steps.
 
 The test starts real service processes and uses real HTTP clients.
 It does not mock HDIP services.

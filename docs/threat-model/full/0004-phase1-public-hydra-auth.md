@@ -100,7 +100,7 @@ This change does not alter Phase 1 API contracts, credential artifact semantics,
 
 ## Residual Risks
 
-- client credentials remain high-value secrets until richer provisioning, rotation, and partner-management tooling exist
+- client credentials remain high-value secrets until richer rotation and partner-management tooling exist
 - no rate limiting is added in this slice, so edge/API gateway controls remain necessary before public exposure
 - no audience check is governed yet
 - no self-service client provisioning or approval workflow exists
@@ -121,7 +121,8 @@ This slice must add or preserve tests for:
 
 ## Related ADRs, Plans, PRs, And Issues
 
-- `docs/plans/active/0018-phase1-public-hydra-auth.md`
+- `docs/plans/archive/0018-phase1-public-hydra-auth.md`
+- `docs/plans/active/0019-phase1-pilot-readiness-completion.md`
 - `docs/adr/0012-phase1-public-hydra-auth.md`
 - `docs/adr/0008-phase1-auth-and-attribution-boundary.md`
 - `docs/adr/0010-phase1-internal-trust-service-identity-and-sql-lifecycle.md`

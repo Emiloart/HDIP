@@ -15,6 +15,9 @@ This delta covers the design of the first fintech/exchange product integration l
 
 No runtime code is changed in this slice.
 
+Current note: public issuer/verifier auth was later implemented under ADR 0012 and threat model 0004.
+Pilot operations and partner provisioning are tracked in threat delta 0007.
+
 ## New or changed entry points
 
 Designed but not implemented:
@@ -80,7 +83,7 @@ Designed but not implemented:
 
 ## Residual risks
 
-- public issuer/verifier auth remains a future implementation boundary
+- public issuer/verifier auth is implemented; controlled partner provisioning and edge operations remain pilot-readiness work
 - first deployment has a single SQL operational dependency
 - temporary artifact transfer has more user-handling risk than a later wallet flow
 - partner systems can still mishandle result retention outside HDIP unless contracts and onboarding reviews catch it
@@ -98,7 +101,8 @@ Future implementation slices must add:
 
 ## Related ADRs, plans, PRs, and issues
 
-- `docs/plans/active/0017-phase1-fintech-exchange-product-layer.md`
+- `docs/plans/archive/0017-phase1-fintech-exchange-product-layer.md`
+- `docs/threat-model/delta/0007-phase1-pilot-operations.md`
 - `docs/adr/0011-phase1-fintech-exchange-deployment-topology.md`
 - `docs/adr/0010-phase1-internal-trust-service-identity-and-sql-lifecycle.md`
 - `docs/threat-model/full/0003-phase1-kyc-issuance-verification-and-auth.md`

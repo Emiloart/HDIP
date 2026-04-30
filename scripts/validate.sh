@@ -26,3 +26,7 @@ if [[ "${HDIP_VALIDATE_PHASE1_SANDBOX:-0}" == "1" ]]; then
     HDIP_PHASE1_SANDBOX_DRY_RUN=1 \
     bash scripts/phase1-sandbox.sh
 fi
+
+if [[ "${HDIP_VALIDATE_PHASE1_PUBLIC_AUTH_SMOKE:-0}" == "1" ]]; then
+  bash scripts/phase1-public-auth-smoke.sh
+fi

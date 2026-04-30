@@ -83,7 +83,7 @@ export function VerifyCredentialWorkflow() {
 function VerificationResultView(props: { result: VerificationResult }) {
   return (
     <section className={`result-panel decision-${props.result.decision}`} aria-label="Verification result">
-      <h2>{props.result.decision}</h2>
+      <h2><span className={`decision-badge decision-badge-${props.result.decision}`}>{props.result.decision}</span></h2>
       <dl className="result-grid">
         <div>
           <dt>Verification ID</dt>
@@ -97,7 +97,7 @@ function VerificationResultView(props: { result: VerificationResult }) {
         ) : null}
         <div>
           <dt>Credential status</dt>
-          <dd>{props.result.credentialStatus}</dd>
+          <dd><span className={`status-chip status-${props.result.credentialStatus}`}>{props.result.credentialStatus}</span></dd>
         </div>
         <div>
           <dt>Issuer ID</dt>

@@ -37,7 +37,7 @@ It is a first-pilot deployment shape that remains compatible with the accepted r
 Normal service startup must not be the primary schema migration or trust bootstrap mechanism.
 
 Hydra remains the governed identity service for internal verifier-to-trust-registry runtime trust reads from ADR 0010.
-This ADR does not govern public issuer or verifier operator authentication.
+Public issuer and verifier client-credentials auth is governed by ADR 0012.
 
 ## Alternatives considered
 
@@ -89,11 +89,11 @@ Do not run a pilot where services start against unmigrated or unbootstrapped SQL
 
 - which cloud provider hosts the first pilot
 - whether the first deployment uses managed PostgreSQL or a Cockroach-compatible managed SQL option
-- whether issuer console access is protected by Zero Trust, VPN, or a later governed public auth rollout
+- whether issuer console access is protected by Zero Trust, VPN, or later delegated user auth
 
 ## Related plans, PRs, and issues
 
-- `docs/plans/active/0017-phase1-fintech-exchange-product-layer.md`
+- `docs/plans/archive/0017-phase1-fintech-exchange-product-layer.md`
 - `docs/product/phase1-issuer-console.md`
 - `docs/integration/phase1-verifier-sdk-and-api-guide.md`
 - `docs/deployment/phase1-fintech-exchange-cloud-infra.md`

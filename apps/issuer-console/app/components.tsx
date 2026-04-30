@@ -152,7 +152,7 @@ function CredentialCreatedSummary(props: { response: IssuanceResponse }) {
   }
 
   return (
-    <section className="result-panel" aria-label="Created credential">
+    <section className="result-panel success-panel" aria-label="Created credential">
       <h2>Credential created</h2>
       <p className="helper-copy">
         Copy the verifier transfer payload into the verifier console to complete the Phase 1 sandbox loop.
@@ -165,7 +165,7 @@ function CredentialCreatedSummary(props: { response: IssuanceResponse }) {
         </div>
         <div>
           <dt>Status</dt>
-          <dd>{props.response.status}</dd>
+          <dd><span className={`status-chip status-${props.response.status}`}>{props.response.status}</span></dd>
         </div>
         <div>
           <dt>Expires</dt>
@@ -185,8 +185,8 @@ function CredentialCreatedSummary(props: { response: IssuanceResponse }) {
         <textarea readOnly value={artifact} aria-label="Opaque credential artifact" />
       </details>
       <div className="button-row">
-        <button type="button" onClick={copyVerifierPayload}>Copy verifier payload</button>
-        <button type="button" onClick={copyArtifact}>Copy artifact</button>
+        <button type="button" className="secondary-button" onClick={copyVerifierPayload}>Copy verifier payload</button>
+        <button type="button" className="secondary-button" onClick={copyArtifact}>Copy artifact</button>
         <Link className="button-link" href={`/credentials/${encodeURIComponent(props.response.credentialId)}`}>
           Open detail
         </Link>
@@ -246,8 +246,8 @@ export function CredentialLookupWorkflow() {
                     <Link href={`/credentials/${encodeURIComponent(credential.credentialId)}`}>
                       {credential.credentialId}
                     </Link>
-                  </td>
-                  <td>{credential.status}</td>
+                </td>
+                  <td><span className={`status-chip status-${credential.status}`}>{credential.status}</span></td>
                   <td>{formatDateTime(credential.expiresAt)}</td>
                 </tr>
               ))}
@@ -328,12 +328,12 @@ export function CredentialDetailWorkflow(props: { credentialId: string }) {
           <CredentialDetail record={record} />
           <div className="button-row">
             {statusActions.includes("revoked") ? (
-              <button type="button" onClick={() => setPendingAction("revoked")}>Revoke</button>
+              <button type="button" className="danger-button" onClick={() => setPendingAction("revoked")}>Revoke</button>
             ) : null}
             {statusActions.includes("superseded") ? (
-              <button type="button" onClick={() => setPendingAction("superseded")}>Supersede</button>
+              <button type="button" className="danger-button" onClick={() => setPendingAction("superseded")}>Supersede</button>
             ) : null}
-            <button type="button" onClick={() => void loadCredential()}>Refresh</button>
+            <button type="button" className="secondary-button" onClick={() => void loadCredential()}>Refresh</button>
           </div>
           {pendingAction !== null ? (
             <section className="modal-panel" role="dialog" aria-modal="true" aria-label="Confirm status update">
@@ -352,12 +352,13 @@ export function CredentialDetailWorkflow(props: { credentialId: string }) {
               <div className="button-row">
                 <button
                   type="button"
+                  className="danger-button"
                   onClick={confirmStatusUpdate}
                   disabled={isUpdating || (pendingAction === "superseded" && supersededByCredentialId.trim() === "")}
                 >
                   {isUpdating ? "Updating..." : "Confirm"}
                 </button>
-                <button type="button" onClick={() => setPendingAction(null)} disabled={isUpdating}>
+                <button type="button" className="secondary-button" onClick={() => setPendingAction(null)} disabled={isUpdating}>
                   Cancel
                 </button>
               </div>
@@ -401,7 +402,7 @@ function CredentialDetail(props: { record: CredentialRecord }) {
         </div>
         <div>
           <dt>Status</dt>
-          <dd>{props.record.status}</dd>
+          <dd><span className={`status-chip status-${props.record.status}`}>{props.record.status}</span></dd>
         </div>
         <div>
           <dt>Issued</dt>
@@ -443,8 +444,8 @@ function CredentialDetail(props: { record: CredentialRecord }) {
             <textarea readOnly value={artifact} aria-label="Opaque credential artifact" />
           </details>
           <div className="button-row">
-            <button type="button" onClick={copyVerifierPayload}>Copy verifier payload</button>
-            <button type="button" onClick={copyArtifact}>Copy artifact</button>
+            <button type="button" className="secondary-button" onClick={copyVerifierPayload}>Copy verifier payload</button>
+            <button type="button" className="secondary-button" onClick={copyArtifact}>Copy artifact</button>
           </div>
         </>
       ) : null}

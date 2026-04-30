@@ -183,7 +183,7 @@ If Hydra public auth fails in a pilot, stop public ingress and repair Hydra/clie
 - Public quickstart and Compose provisioning must create public issuer/verifier clients.
 - Public quickstart uses bearer tokens instead of `X-HDIP-*` headers.
 - Token introspection becomes a readiness dependency when Hydra auth mode is enabled.
-- Public client provisioning remains manual for Phase 1.
+- Public client provisioning remains operator-driven for Phase 1 and may use the pilot provisioning script.
 
 ## Open Questions
 
@@ -193,7 +193,8 @@ If Hydra public auth fails in a pilot, stop public ingress and repair Hydra/clie
 
 ## Related Plans, PRs, And Issues
 
-- `docs/plans/active/0018-phase1-public-hydra-auth.md`
+- `docs/plans/archive/0018-phase1-public-hydra-auth.md`
+- `docs/plans/active/0019-phase1-pilot-readiness-completion.md`
 - `docs/adr/0008-phase1-auth-and-attribution-boundary.md`
 - `docs/adr/0010-phase1-internal-trust-service-identity-and-sql-lifecycle.md`
 - `docs/adr/0011-phase1-fintech-exchange-deployment-topology.md`
