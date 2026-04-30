@@ -42,8 +42,9 @@ Authorization: Bearer <verifier-access-token>
 Idempotency-Key: <unique-operation-key>
 ```
 
-The production public verifier auth mechanism is not yet implemented in the current repo.
-Until that slice lands, local and sandbox flows use the governed service-edge attribution boundary described in ADR 0008.
+Public Phase 1 verifier auth uses Hydra OAuth2 client credentials and bearer tokens.
+The OAuth `client_id` is the verifier organization identifier used for attribution.
+Local process-run sandbox automation may still use deprecated header attribution, but packaged/pilot flows must use bearer tokens.
 
 Request:
 
@@ -212,7 +213,7 @@ Error payloads follow `schemas/json/common/error-envelope.schema.json`.
 The developer portal should publish:
 
 - quickstart
-- authentication setup once public verifier auth is governed
+- Hydra client-credentials authentication setup
 - cURL verification example
 - TypeScript SDK example
 - error reference

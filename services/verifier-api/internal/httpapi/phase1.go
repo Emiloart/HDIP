@@ -32,6 +32,7 @@ var verificationBaseTime = time.Date(2026, time.April, 20, 9, 5, 0, 0, time.UTC)
 
 type phase1VerifierHandler struct {
 	verifierExtractor authctx.VerifierIntegratorExtractor
+	authReady         authctx.ReadinessChecker
 	store             *phase1.RuntimeStore
 	trustRuntimeReady phase1ReadinessProbe
 	trusts            phase1.TrustReadRepository
@@ -103,7 +104,13 @@ func newPhase1VerifierHandler(cfg config.Config) (*phase1VerifierHandler, error)
 		return nil, err
 	}
 
-	return newPhase1VerifierHandlerWithStoreAndTrustAndReadiness(store, trusts, tokenSource), nil
+	verifierExtractor, authReady, err := verifierExtractorFromConfig(cfg)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+
+	return newPhase1VerifierHandlerWithStoreAndTrustAndReadinessAndExtractor(store, trusts, tokenSource, verifierExtractor, authReady), nil
 }
 
 func newPhase1VerifierHandlerWithStore(store *phase1.RuntimeStore) *phase1VerifierHandler {
@@ -126,8 +133,29 @@ func newPhase1VerifierHandlerWithStoreAndTrustAndReadiness(
 		trusts = store
 	}
 
+	return newPhase1VerifierHandlerWithStoreAndTrustAndReadinessAndExtractor(
+		store,
+		trusts,
+		trustRuntimeReady,
+		authctx.HeaderVerifierIntegratorExtractor{},
+		nil,
+	)
+}
+
+func newPhase1VerifierHandlerWithStoreAndTrustAndReadinessAndExtractor(
+	store *phase1.RuntimeStore,
+	trusts phase1.TrustReadRepository,
+	trustRuntimeReady phase1ReadinessProbe,
+	verifierExtractor authctx.VerifierIntegratorExtractor,
+	authReady authctx.ReadinessChecker,
+) *phase1VerifierHandler {
+	if trusts == nil {
+		trusts = store
+	}
+
 	return &phase1VerifierHandler{
-		verifierExtractor: authctx.HeaderVerifierIntegratorExtractor{},
+		verifierExtractor: verifierExtractor,
+		authReady:         authReady,
 		store:             store,
 		trustRuntimeReady: trustRuntimeReady,
 		trusts:            trusts,
@@ -147,12 +175,38 @@ func (h *phase1VerifierHandler) readiness(ctx context.Context) error {
 			return err
 		}
 	}
+	if h.authReady != nil {
+		if err := h.authReady.Check(ctx); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
 
 func (h *phase1VerifierHandler) runtimeMode() string {
 	return h.store.RuntimeMode()
+}
+
+func verifierExtractorFromConfig(cfg config.Config) (authctx.VerifierIntegratorExtractor, authctx.ReadinessChecker, error) {
+	switch strings.TrimSpace(cfg.PublicAuthMode) {
+	case "header":
+		return authctx.HeaderVerifierIntegratorExtractor{}, nil, nil
+	case "hydra":
+		extractor, err := authctx.NewHydraVerifierIntegratorExtractor(authctx.HydraIntrospectionConfig{
+			IntrospectionURL: cfg.PublicAuthHydraIntrospectionURL,
+			ClientID:         cfg.PublicAuthHydraIntrospectionClientID,
+			ClientSecret:     cfg.PublicAuthHydraIntrospectionClientSecret,
+			HTTPClient:       &http.Client{Timeout: cfg.RequestTimeout},
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return extractor, extractor, nil
+	default:
+		return nil, nil, errors.New("unsupported public auth mode")
+	}
 }
 
 func (h *phase1VerifierHandler) createVerification(w http.ResponseWriter, r *http.Request) {
@@ -386,6 +440,10 @@ func (h *phase1VerifierHandler) getVerification(w http.ResponseWriter, r *http.R
 func (h *phase1VerifierHandler) requireVerifierAttribution(w http.ResponseWriter, r *http.Request, scope string) (authctx.Attribution, bool) {
 	attribution, err := h.verifierExtractor.VerifierIntegratorFromRequest(r)
 	if err != nil {
+		if errors.Is(err, authctx.ErrAuthUnavailable) {
+			httpx.WriteError(w, r.Context(), http.StatusServiceUnavailable, "auth_unavailable", "verifier authentication provider is unavailable")
+			return authctx.Attribution{}, false
+		}
 		httpx.WriteError(w, r.Context(), http.StatusUnauthorized, "unauthenticated", "authenticated verifier attribution is required")
 		return authctx.Attribution{}, false
 	}

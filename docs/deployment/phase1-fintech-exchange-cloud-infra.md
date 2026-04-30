@@ -78,7 +78,8 @@ Owns:
 
 Hydra is used for the governed internal verifier-to-trust-registry client-credentials flow from ADR 0010.
 
-It is not yet the public issuer/verifier operator auth rollout.
+Hydra is also used for public Phase 1 issuer/verifier client-credentials auth from ADR 0012.
+Issuer and verifier services validate public bearer tokens through Hydra introspection.
 
 ### SQL
 
@@ -188,6 +189,8 @@ Required secret classes:
 - SQL credentials
 - Hydra system secrets and client credentials
 - service-to-service client secret for verifier runtime trust reads
+- public issuer/verifier client credentials
+- issuer/verifier resource-server introspection credentials
 - edge or deployment credentials
 
 Rules:

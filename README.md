@@ -6,8 +6,8 @@ Users hold portable credentials and selective disclosure proofs, while issuers, 
 ## Current phase
 
 This repository is in Phase 1 product hardening for the reusable KYC credential and verifier API loop.
-Governance, foundation scaffolding, contract parity, deterministic issuer/verifier application logic, SQL-primary persistence, Hydra-backed internal trust reads, console shells, transfer bridge, sandbox automation, and local Docker Compose packaging are in place.
-Wallet flows, selective disclosure, proof verification, public production auth, and multi-region production infrastructure remain intentionally deferred.
+Governance, foundation scaffolding, contract parity, deterministic issuer/verifier application logic, SQL-primary persistence, Hydra-backed internal trust reads, Hydra-backed public issuer/verifier auth, console shells, transfer bridge, sandbox automation, and local Docker Compose packaging are in place.
+Wallet flows, selective disclosure, proof verification, self-service partner provisioning, and multi-region production infrastructure remain intentionally deferred.
 
 ## Working agreements
 

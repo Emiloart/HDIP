@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Emiloart/HDIP/packages/go/foundation/authctx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/testutil"
 	phase1sql "github.com/Emiloart/HDIP/services/internal/phase1sql"
@@ -177,6 +178,52 @@ func TestPhase1CreateVerificationRejectsMissingScope(t *testing.T) {
 		strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
 	)
 	setVerifierPhase1Headers(request, []string{verifierReadScope})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", recorder.Code)
+	}
+}
+
+func TestPhase1CreateVerificationAcceptsHydraBearerAttribution(t *testing.T) {
+	store := newVerifierStoreWithDefaults(t)
+	extractor := newTestVerifierHydraExtractor(t, []string{verifierCreateScope})
+	handler := newMuxWithPhase1Handler(
+		slog.Default(),
+		testVerifierConfig(t),
+		newPhase1VerifierHandlerWithStoreAndTrustAndReadinessAndExtractor(store, store, nil, extractor, extractor),
+	)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/verifier/verifications",
+		strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
+	)
+	request.Header.Set("Authorization", "Bearer verifier-token")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPhase1CreateVerificationRejectsHydraBearerMissingScope(t *testing.T) {
+	store := newVerifierStoreWithDefaults(t)
+	extractor := newTestVerifierHydraExtractor(t, []string{verifierReadScope})
+	handler := newMuxWithPhase1Handler(
+		slog.Default(),
+		testVerifierConfig(t),
+		newPhase1VerifierHandlerWithStoreAndTrustAndReadinessAndExtractor(store, store, nil, extractor, extractor),
+	)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/verifier/verifications",
+		strings.NewReader(loadVerifierFixtureText(t, "schemas/examples/verifier/verification-submission-request.hdip-passport-basic.json")),
+	)
+	request.Header.Set("Authorization", "Bearer verifier-token")
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
@@ -1116,6 +1163,42 @@ func setVerifierPhase1Headers(request *http.Request, scopes []string) {
 	request.Header.Set("X-HDIP-Organization-ID", "verifier_org_marketplace_alpha")
 	request.Header.Set("X-HDIP-Auth-Reference", "credential_verifier_001")
 	request.Header.Set("X-HDIP-Scopes", strings.Join(scopes, ","))
+}
+
+func newTestVerifierHydraExtractor(t *testing.T, scopes []string) *authctx.HydraVerifierIntegratorExtractor {
+	t.Helper()
+
+	scopeSet := strings.Join(scopes, " ")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected hydra introspection method: %s", r.Method)
+		}
+		if username, password, ok := r.BasicAuth(); !ok || username != "verifier-api-public" || password != "verifier-introspection-secret" {
+			t.Fatalf("unexpected hydra introspection client credentials")
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse hydra introspection form: %v", err)
+		}
+		if r.Form.Get("token") != "verifier-token" && r.Form.Get("token") != "phase1-public-auth-readiness-probe" {
+			t.Fatalf("unexpected hydra introspection token: %q", r.Form.Get("token"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"active":true,"client_id":"verifier_org_marketplace_alpha","scope":"` + scopeSet + `","jti":"verifier-token-id"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	extractor, err := authctx.NewHydraVerifierIntegratorExtractor(authctx.HydraIntrospectionConfig{
+		IntrospectionURL: server.URL,
+		ClientID:         "verifier-api-public",
+		ClientSecret:     "verifier-introspection-secret",
+		HTTPClient:       server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("new hydra verifier extractor: %v", err)
+	}
+
+	return extractor
 }
 
 func loadVerifierFixtureText(t *testing.T, relativePath string) string {

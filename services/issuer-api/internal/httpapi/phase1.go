@@ -32,6 +32,7 @@ var isoCountryCodePattern = regexp.MustCompile(`^[A-Z]{2}$`)
 
 type phase1IssuerHandler struct {
 	issuerExtractor authctx.IssuerOperatorExtractor
+	authReady       authctx.ReadinessChecker
 	store           *phase1.RuntimeStore
 	issuers         phase1.IssuerRecordRepository
 	credentials     phase1.CredentialRecordRepository
@@ -111,12 +112,27 @@ func newPhase1IssuerHandler(cfg config.Config) (*phase1IssuerHandler, error) {
 		return nil, err
 	}
 
-	return newPhase1IssuerHandlerWithStore(store), nil
+	issuerExtractor, authReady, err := issuerExtractorFromConfig(cfg)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+
+	return newPhase1IssuerHandlerWithStoreAndExtractor(store, issuerExtractor, authReady), nil
 }
 
 func newPhase1IssuerHandlerWithStore(store *phase1.RuntimeStore) *phase1IssuerHandler {
+	return newPhase1IssuerHandlerWithStoreAndExtractor(store, authctx.HeaderIssuerOperatorExtractor{}, nil)
+}
+
+func newPhase1IssuerHandlerWithStoreAndExtractor(
+	store *phase1.RuntimeStore,
+	issuerExtractor authctx.IssuerOperatorExtractor,
+	authReady authctx.ReadinessChecker,
+) *phase1IssuerHandler {
 	return &phase1IssuerHandler{
-		issuerExtractor: authctx.HeaderIssuerOperatorExtractor{},
+		issuerExtractor: issuerExtractor,
+		authReady:       authReady,
 		store:           store,
 		issuers:         store,
 		credentials:     store,
@@ -125,11 +141,41 @@ func newPhase1IssuerHandlerWithStore(store *phase1.RuntimeStore) *phase1IssuerHa
 }
 
 func (h *phase1IssuerHandler) readiness(ctx context.Context) error {
-	return h.store.CheckReadiness(ctx, true)
+	if err := h.store.CheckReadiness(ctx, true); err != nil {
+		return err
+	}
+	if h.authReady != nil {
+		if err := h.authReady.Check(ctx); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (h *phase1IssuerHandler) runtimeMode() string {
 	return h.store.RuntimeMode()
+}
+
+func issuerExtractorFromConfig(cfg config.Config) (authctx.IssuerOperatorExtractor, authctx.ReadinessChecker, error) {
+	switch strings.TrimSpace(cfg.PublicAuthMode) {
+	case "header":
+		return authctx.HeaderIssuerOperatorExtractor{}, nil, nil
+	case "hydra":
+		extractor, err := authctx.NewHydraIssuerOperatorExtractor(authctx.HydraIntrospectionConfig{
+			IntrospectionURL: cfg.PublicAuthHydraIntrospectionURL,
+			ClientID:         cfg.PublicAuthHydraIntrospectionClientID,
+			ClientSecret:     cfg.PublicAuthHydraIntrospectionClientSecret,
+			HTTPClient:       &http.Client{Timeout: cfg.RequestTimeout},
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return extractor, extractor, nil
+	default:
+		return nil, nil, errors.New("unsupported public auth mode")
+	}
 }
 
 func (h *phase1IssuerHandler) issueCredential(w http.ResponseWriter, r *http.Request) {
@@ -451,6 +497,10 @@ func (h *phase1IssuerHandler) updateCredentialStatus(w http.ResponseWriter, r *h
 func (h *phase1IssuerHandler) requireIssuerAttribution(w http.ResponseWriter, r *http.Request, scope string) (authctx.Attribution, bool) {
 	attribution, err := h.issuerExtractor.IssuerOperatorFromRequest(r)
 	if err != nil {
+		if errors.Is(err, authctx.ErrAuthUnavailable) {
+			httpx.WriteError(w, r.Context(), http.StatusServiceUnavailable, "auth_unavailable", "issuer authentication provider is unavailable")
+			return authctx.Attribution{}, false
+		}
 		httpx.WriteError(w, r.Context(), http.StatusUnauthorized, "unauthenticated", "authenticated issuer attribution is required")
 		return authctx.Attribution{}, false
 	}

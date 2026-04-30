@@ -22,6 +22,9 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if cfg.Port != 8082 {
 		t.Fatalf("expected default port 8082, got %d", cfg.Port)
 	}
+	if cfg.PublicAuthMode != "header" {
+		t.Fatalf("expected default public auth mode header, got %q", cfg.PublicAuthMode)
+	}
 }
 
 func TestValidateRejectsInvalidPort(t *testing.T) {
@@ -30,6 +33,7 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 		Host:                          "127.0.0.1",
 		Port:                          70000,
 		LogLevel:                      "INFO",
+		Environment:                   "development",
 		RequestTimeout:                time.Second,
 		ReadHeaderTimeout:             time.Second,
 		ShutdownTimeout:               time.Second,
@@ -40,6 +44,7 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 		TrustRuntimeHydraClientID:     "verifier-api",
 		TrustRuntimeHydraClientSecret: "trust-runtime-test-secret",
 		TrustRuntimeHydraScope:        "trust.runtime.read",
+		PublicAuthMode:                "header",
 		BuildVersion:                  "dev",
 	}
 
@@ -68,6 +73,75 @@ func TestLoadReadsTrustRegistryAndDatabaseSettings(t *testing.T) {
 		cfg.TrustRuntimeHydraClientID != "verifier-api" ||
 		cfg.TrustRuntimeHydraScope != "trust.runtime.read" {
 		t.Fatalf("unexpected config: %+v", cfg)
+	}
+}
+
+func TestLoadReadsHydraPublicAuthSettings(t *testing.T) {
+	t.Setenv("HDIP_PHASE1_DATABASE_URL", "postgres://phase1")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
+	t.Setenv("HDIP_PUBLIC_AUTH_MODE", "hydra")
+	t.Setenv("HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_URL", "http://127.0.0.1:4445/admin/oauth2/introspect")
+	t.Setenv("HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_CLIENT_ID", "verifier-api-public")
+	t.Setenv("HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_CLIENT_SECRET", "verifier-introspection-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.PublicAuthMode != "hydra" ||
+		cfg.PublicAuthHydraIntrospectionURL != "http://127.0.0.1:4445/admin/oauth2/introspect" ||
+		cfg.PublicAuthHydraIntrospectionClientID != "verifier-api-public" {
+		t.Fatalf("unexpected public auth config: %+v", cfg)
+	}
+}
+
+func TestLoadRejectsHydraPublicAuthWithoutIntrospectionConfig(t *testing.T) {
+	t.Setenv("HDIP_PHASE1_DATABASE_URL", "postgres://phase1")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_TOKEN_URL", "http://127.0.0.1:4444/oauth2/token")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_ID", "verifier-api")
+	t.Setenv("HDIP_TRUST_RUNTIME_HYDRA_CLIENT_SECRET", "trust-runtime-test-secret")
+	t.Setenv("HDIP_PUBLIC_AUTH_MODE", "hydra")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected missing hydra public auth config error")
+	}
+
+	if !strings.Contains(err.Error(), "HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_URL") {
+		t.Fatalf("expected hydra introspection url error, got %v", err)
+	}
+}
+
+func TestValidateRejectsHeaderPublicAuthInProduction(t *testing.T) {
+	cfg := Config{
+		ServiceName:                   serviceName,
+		Host:                          "127.0.0.1",
+		Port:                          8082,
+		LogLevel:                      "INFO",
+		Environment:                   "production",
+		RequestTimeout:                time.Second,
+		ReadHeaderTimeout:             time.Second,
+		ShutdownTimeout:               time.Second,
+		Phase1DatabaseDriver:          "pgx",
+		Phase1DatabaseURL:             "postgres://phase1",
+		TrustRegistryBaseURL:          "http://127.0.0.1:8083",
+		TrustRuntimeHydraTokenURL:     "http://127.0.0.1:4444/oauth2/token",
+		TrustRuntimeHydraClientID:     "verifier-api",
+		TrustRuntimeHydraClientSecret: "trust-runtime-test-secret",
+		TrustRuntimeHydraScope:        "trust.runtime.read",
+		PublicAuthMode:                "header",
+		BuildVersion:                  "dev",
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected production header auth validation error")
+	}
+	if !strings.Contains(err.Error(), "HDIP_ENVIRONMENT=production") {
+		t.Fatalf("expected production validation error, got %v", err)
 	}
 }
 
@@ -128,6 +202,7 @@ func TestValidateRejectsSQLPrimaryWithoutDatabaseURL(t *testing.T) {
 		Host:                          "127.0.0.1",
 		Port:                          8082,
 		LogLevel:                      "INFO",
+		Environment:                   "development",
 		RequestTimeout:                time.Second,
 		ReadHeaderTimeout:             time.Second,
 		ShutdownTimeout:               time.Second,
@@ -136,6 +211,7 @@ func TestValidateRejectsSQLPrimaryWithoutDatabaseURL(t *testing.T) {
 		TrustRuntimeHydraClientID:     "verifier-api",
 		TrustRuntimeHydraClientSecret: "trust-runtime-test-secret",
 		TrustRuntimeHydraScope:        "trust.runtime.read",
+		PublicAuthMode:                "header",
 		BuildVersion:                  "dev",
 	}
 

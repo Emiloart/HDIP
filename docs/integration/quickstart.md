@@ -10,7 +10,8 @@ This quickstart lets a fintech or exchange engineer run the HDIP Phase 1 reusabl
 4. verify that the same credential is denied
 
 This is a sandbox path only.
-It does not add wallet flows, selective disclosure, proof verification, or public production auth.
+It uses Hydra OAuth2 client credentials for packaged local issuer/verifier API access.
+It does not add wallet flows, selective disclosure, proof verification, or production partner provisioning automation.
 
 ## Prerequisites
 
@@ -43,17 +44,39 @@ Public local endpoints:
 - Hydra public: `http://127.0.0.1:4444`
 - Hydra admin: `http://127.0.0.1:4445` for local debugging only
 
+## Get sandbox access tokens
+
+The local Compose stack provisions one issuer public client and one verifier public client.
+The issuer client ID is the issuer organization identifier, so it uses `client_secret_post` to support the sandbox DID value.
+
+```bash
+issuer_token="$(curl -fsS http://127.0.0.1:4444/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  --data-urlencode "client_id=did:web:issuer.hdip.dev" \
+  --data-urlencode "client_secret=issuer-public-client-secret" \
+  --data-urlencode "scope=issuer.credentials.issue issuer.credentials.read issuer.credentials.status.write" \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])'
+)"
+
+verifier_token="$(curl -fsS http://127.0.0.1:4444/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  --data-urlencode "client_id=verifier_org_sandbox" \
+  --data-urlencode "client_secret=verifier-public-client-secret" \
+  --data-urlencode "scope=verifier.requests.create verifier.results.read" \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])'
+)"
+```
+
 ## Issue a credential
 
 ```bash
 curl -sS http://127.0.0.1:18081/v1/issuer/credentials \
+  -H "Authorization: Bearer ${issuer_token}" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -H "Idempotency-Key: quickstart-issue-001" \
-  -H "X-HDIP-Principal-ID: issuer_operator_quickstart" \
-  -H "X-HDIP-Organization-ID: did:web:issuer.hdip.dev" \
-  -H "X-HDIP-Auth-Reference: quickstart" \
-  -H "X-HDIP-Scopes: issuer.credentials.issue, issuer.credentials.read, issuer.credentials.status.write" \
   -d '{
     "templateId": "hdip-passport-basic",
     "subjectReference": "quickstart-subject-001",
@@ -103,13 +126,10 @@ print(json.dumps({
 PY
 
 curl -sS http://127.0.0.1:18082/v1/verifier/verifications \
+  -H "Authorization: Bearer ${verifier_token}" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -H "Idempotency-Key: quickstart-verify-allow-001" \
-  -H "X-HDIP-Principal-ID: verifier_integrator_quickstart" \
-  -H "X-HDIP-Organization-ID: verifier_org_quickstart" \
-  -H "X-HDIP-Auth-Reference: quickstart" \
-  -H "X-HDIP-Scopes: verifier.requests.create, verifier.results.read" \
   --data-binary @/tmp/hdip-verification-request.json
 ```
 
@@ -123,23 +143,17 @@ Expected `decision`:
 
 ```bash
 curl -sS "http://127.0.0.1:18081/v1/issuer/credentials/${credential_id}/status" \
+  -H "Authorization: Bearer ${issuer_token}" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -H "Idempotency-Key: quickstart-revoke-001" \
-  -H "X-HDIP-Principal-ID: issuer_operator_quickstart" \
-  -H "X-HDIP-Organization-ID: did:web:issuer.hdip.dev" \
-  -H "X-HDIP-Auth-Reference: quickstart" \
-  -H "X-HDIP-Scopes: issuer.credentials.issue, issuer.credentials.read, issuer.credentials.status.write" \
   -d '{"status":"revoked"}'
 
 curl -sS http://127.0.0.1:18082/v1/verifier/verifications \
+  -H "Authorization: Bearer ${verifier_token}" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -H "Idempotency-Key: quickstart-verify-deny-001" \
-  -H "X-HDIP-Principal-ID: verifier_integrator_quickstart" \
-  -H "X-HDIP-Organization-ID: verifier_org_quickstart" \
-  -H "X-HDIP-Auth-Reference: quickstart" \
-  -H "X-HDIP-Scopes: verifier.requests.create, verifier.results.read" \
   --data-binary @/tmp/hdip-verification-request.json
 ```
 
@@ -151,7 +165,7 @@ Expected `decision`:
 
 ## One-command lifecycle check
 
-If you prefer an automated assertion path, use the sandbox runner with real SQL and Hydra:
+If you prefer an automated process-run assertion path, use the sandbox runner with real SQL and Hydra:
 
 ```bash
 export DATABASE_URL="postgres://hdip:hdip_sandbox_password@127.0.0.1:15432/hdip_phase1?sslmode=disable"
@@ -163,6 +177,9 @@ export TRUST_REGISTRY_INTROSPECTION_CLIENT_SECRET="trust-registry-introspection-
 bash scripts/phase1-sandbox.sh
 ```
 
+That runner starts local service processes in deprecated header-auth mode for automation compatibility.
+The packaged Compose quickstart above is the public-auth path.
+
 Expected final line:
 
 ```text
@@ -171,7 +188,8 @@ final status: PASS
 
 ## Security notes
 
-- The `X-HDIP-*` headers are the current governed service-edge attribution boundary for sandbox flows, not production public auth.
+- Packaged local issuer/verifier API calls use Hydra bearer tokens.
+- The `X-HDIP-*` headers are retained only for local process-run sandbox automation and tests.
 - Keep verifier calls server-side only.
 - Do not log opaque artifacts, KYC claims, bearer tokens, or client secrets.
 - Do not treat the Phase 1 artifact as a signed credential or proof.

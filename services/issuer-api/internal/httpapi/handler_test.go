@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Emiloart/HDIP/packages/go/foundation/authctx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/httpx"
 	"github.com/Emiloart/HDIP/packages/go/foundation/testutil"
 	phase1sql "github.com/Emiloart/HDIP/services/internal/phase1sql"
@@ -144,6 +145,52 @@ func TestPhase1IssueCredentialRejectsMissingScope(t *testing.T) {
 		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/issuance-request.hdip-passport-basic.json")),
 	)
 	setIssuerPhase1Headers(request, []string{issuerReadScope})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", recorder.Code)
+	}
+}
+
+func TestPhase1IssueCredentialAcceptsHydraBearerAttribution(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	extractor := newTestIssuerHydraExtractor(t, []string{issuerIssueScope})
+	handler := newMuxWithPhase1Handler(
+		slog.Default(),
+		testIssuerConfig(t),
+		newPhase1IssuerHandlerWithStoreAndExtractor(store, extractor, extractor),
+	)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials",
+		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/issuance-request.hdip-passport-basic.json")),
+	)
+	request.Header.Set("Authorization", "Bearer issuer-token")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPhase1IssueCredentialRejectsHydraBearerMissingScope(t *testing.T) {
+	store := newIssuerStoreWithDefaults(t)
+	extractor := newTestIssuerHydraExtractor(t, []string{issuerReadScope})
+	handler := newMuxWithPhase1Handler(
+		slog.Default(),
+		testIssuerConfig(t),
+		newPhase1IssuerHandlerWithStoreAndExtractor(store, extractor, extractor),
+	)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/issuer/credentials",
+		strings.NewReader(loadFixtureText(t, "schemas/examples/issuer/issuance-request.hdip-passport-basic.json")),
+	)
+	request.Header.Set("Authorization", "Bearer issuer-token")
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
@@ -769,6 +816,42 @@ func setIssuerPhase1Headers(request *http.Request, scopes []string) {
 	request.Header.Set("X-HDIP-Organization-ID", defaultPhase1IssuerID)
 	request.Header.Set("X-HDIP-Auth-Reference", "session_issuer_001")
 	request.Header.Set("X-HDIP-Scopes", strings.Join(scopes, ","))
+}
+
+func newTestIssuerHydraExtractor(t *testing.T, scopes []string) *authctx.HydraIssuerOperatorExtractor {
+	t.Helper()
+
+	scopeSet := strings.Join(scopes, " ")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected hydra introspection method: %s", r.Method)
+		}
+		if username, password, ok := r.BasicAuth(); !ok || username != "issuer-api" || password != "issuer-introspection-secret" {
+			t.Fatalf("unexpected hydra introspection client credentials")
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse hydra introspection form: %v", err)
+		}
+		if r.Form.Get("token") != "issuer-token" && r.Form.Get("token") != "phase1-public-auth-readiness-probe" {
+			t.Fatalf("unexpected hydra introspection token: %q", r.Form.Get("token"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"active":true,"client_id":"` + defaultPhase1IssuerID + `","scope":"` + scopeSet + `","jti":"issuer-token-id"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	extractor, err := authctx.NewHydraIssuerOperatorExtractor(authctx.HydraIntrospectionConfig{
+		IntrospectionURL: server.URL,
+		ClientID:         "issuer-api",
+		ClientSecret:     "issuer-introspection-secret",
+		HTTPClient:       server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("new hydra issuer extractor: %v", err)
+	}
+
+	return extractor
 }
 
 func loadFixtureText(t *testing.T, relativePath string) string {

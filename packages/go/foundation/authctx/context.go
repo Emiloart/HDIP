@@ -1,6 +1,7 @@
 package authctx
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -19,6 +20,10 @@ type Attribution struct {
 	ActorType               ActorType
 	Scopes                  []string
 	AuthenticationReference string
+}
+
+type ReadinessChecker interface {
+	Check(ctx context.Context) error
 }
 
 type IssuerOperatorExtractor interface {

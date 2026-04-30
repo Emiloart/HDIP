@@ -38,6 +38,7 @@ DerivedData/
 # Secrets and env
 .env
 .env.*
+!infra/phase1/.env.example
 *.pem
 *.key
 *.p12

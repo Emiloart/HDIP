@@ -61,6 +61,16 @@ services:
       TRUST_REGISTRY_INTROSPECTION_CLIENT_ID: ${TRUST_REGISTRY_INTROSPECTION_CLIENT_ID:-trust-registry}
       TRUST_REGISTRY_INTROSPECTION_CLIENT_SECRET: ${TRUST_REGISTRY_INTROSPECTION_CLIENT_SECRET:-trust-registry-introspection-secret}
       TRUST_RUNTIME_SCOPE: ${TRUST_RUNTIME_SCOPE:-trust.runtime.read}
+      ISSUER_API_INTROSPECTION_CLIENT_ID: ${ISSUER_API_INTROSPECTION_CLIENT_ID:-issuer-api}
+      ISSUER_API_INTROSPECTION_CLIENT_SECRET: ${ISSUER_API_INTROSPECTION_CLIENT_SECRET:-issuer-api-introspection-secret}
+      VERIFIER_API_INTROSPECTION_CLIENT_ID: ${VERIFIER_API_INTROSPECTION_CLIENT_ID:-verifier-api-public}
+      VERIFIER_API_INTROSPECTION_CLIENT_SECRET: ${VERIFIER_API_INTROSPECTION_CLIENT_SECRET:-verifier-api-introspection-secret}
+      ISSUER_PUBLIC_CLIENT_ID: ${ISSUER_PUBLIC_CLIENT_ID:-did:web:issuer.hdip.dev}
+      ISSUER_PUBLIC_CLIENT_SECRET: ${ISSUER_PUBLIC_CLIENT_SECRET:-issuer-public-client-secret}
+      ISSUER_PUBLIC_SCOPE: ${ISSUER_PUBLIC_SCOPE:-issuer.credentials.issue issuer.credentials.read issuer.credentials.status.write}
+      VERIFIER_PUBLIC_CLIENT_ID: ${VERIFIER_PUBLIC_CLIENT_ID:-verifier_org_sandbox}
+      VERIFIER_PUBLIC_CLIENT_SECRET: ${VERIFIER_PUBLIC_CLIENT_SECRET:-verifier-public-client-secret}
+      VERIFIER_PUBLIC_SCOPE: ${VERIFIER_PUBLIC_SCOPE:-verifier.requests.create verifier.results.read}
     volumes:
       - ./hydra/bootstrap-clients.sh:/usr/local/bin/bootstrap-clients.sh:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/bootstrap-clients.sh"]
@@ -145,6 +155,11 @@ services:
     environment:
       HDIP_HOST: 0.0.0.0
       HDIP_PORT: 8080
+      HDIP_ENVIRONMENT: development
+      HDIP_PUBLIC_AUTH_MODE: hydra
+      HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_URL: http://hydra:4445/admin/oauth2/introspect
+      HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_CLIENT_ID: ${ISSUER_API_INTROSPECTION_CLIENT_ID:-issuer-api}
+      HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_CLIENT_SECRET: ${ISSUER_API_INTROSPECTION_CLIENT_SECRET:-issuer-api-introspection-secret}
       HDIP_PHASE1_DATABASE_DRIVER: pgx
       HDIP_PHASE1_DATABASE_URL: postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hdip_phase1?sslmode=disable
     ports:
@@ -171,6 +186,11 @@ services:
     environment:
       HDIP_HOST: 0.0.0.0
       HDIP_PORT: 8080
+      HDIP_ENVIRONMENT: development
+      HDIP_PUBLIC_AUTH_MODE: hydra
+      HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_URL: http://hydra:4445/admin/oauth2/introspect
+      HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_CLIENT_ID: ${VERIFIER_API_INTROSPECTION_CLIENT_ID:-verifier-api-public}
+      HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_CLIENT_SECRET: ${VERIFIER_API_INTROSPECTION_CLIENT_SECRET:-verifier-api-introspection-secret}
       HDIP_PHASE1_DATABASE_DRIVER: pgx
       HDIP_PHASE1_DATABASE_URL: postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hdip_phase1?sslmode=disable
       HDIP_TRUST_REGISTRY_BASE_URL: http://trust-registry:8080
