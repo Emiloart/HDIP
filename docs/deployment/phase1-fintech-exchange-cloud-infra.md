@@ -27,6 +27,18 @@ Edge:
 - private network access for `trust-registry`
 - private or protected access for issuer console and operational endpoints
 
+## First Controlled Pilot Profile
+
+The first controlled pilot uses:
+
+- Cloudflare for public DNS, TLS, WAF, request-size limits, and rate limits
+- Vault KV v2 for deployment, service, Hydra, database, and partner secrets
+- one Linux VM running the Phase 1 Docker Compose stack
+- a VM-local reverse proxy for hostname-based routing to Compose services
+
+This is an operational profile for the first pilot under ADR 0011.
+It does not change service contracts, trust decisions, credential semantics, or the deferred long-term global architecture.
+
 ## Why this topology
 
 The first product proof is:
@@ -184,6 +196,13 @@ docker compose --env-file infra/phase1/.env.example -f infra/phase1/docker-compo
 
 Use `docs/integration/quickstart.md` for the external integrator walkthrough and `docs/runbooks/phase1-sandbox.md` for the automated lifecycle check.
 Use `docs/runbooks/phase1-partner-provisioning.md` to provision controlled partner clients and `docs/runbooks/phase1-pilot-readiness.md` before pilot access.
+
+First controlled pilot operations are documented in:
+
+- `docs/runbooks/phase1-cloudflare-edge.md`
+- `docs/runbooks/phase1-vault-secrets.md`
+- `docs/runbooks/phase1-single-vm-compose.md`
+- `docs/runbooks/phase1-pilot-go-no-go.md`
 
 ## Secrets
 

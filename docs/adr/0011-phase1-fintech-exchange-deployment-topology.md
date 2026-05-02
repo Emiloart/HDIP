@@ -87,7 +87,8 @@ Do not run a pilot where services start against unmigrated or unbootstrapped SQL
 
 ## Open questions
 
-- which cloud provider hosts the first pilot
+- the first controlled pilot operations profile is documented in `docs/plans/active/0020-phase1-cloudflare-vault-vm-pilot-hardening.md`: Cloudflare edge, Vault KV v2, and a single Linux VM running Docker Compose
+- which cloud provider hosts later production environments
 - whether the first deployment uses managed PostgreSQL or a Cockroach-compatible managed SQL option
 - whether issuer console access is protected by Zero Trust, VPN, or later delegated user auth
 

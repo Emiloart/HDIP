@@ -17,6 +17,15 @@ It does not mean global production scale.
 - protected issuer console
 - public or partner-restricted verifier API ingress
 
+## Pilot Operations Runbooks
+
+Use these runbooks for the first controlled pilot:
+
+- `docs/runbooks/phase1-cloudflare-edge.md` for Cloudflare DNS, TLS, WAF, route, and rate-limit setup.
+- `docs/runbooks/phase1-vault-secrets.md` for Vault KV v2 paths, secret handling, rotation, and emergency revocation.
+- `docs/runbooks/phase1-single-vm-compose.md` for the single Linux VM Docker Compose deployment.
+- `docs/runbooks/phase1-pilot-go-no-go.md` for the final readiness decision before partner access.
+
 ## Required Environment Separation
 
 Use `infra/phase1/.env.example` only for local Compose.
@@ -56,6 +65,7 @@ Enforce these outside the issuer/verifier business logic:
 - no public access to debug, admin, database, or bootstrap surfaces
 
 Do not implement Phase 1 rate limiting inside credential issuance or verification business logic.
+For the first controlled pilot, Cloudflare is the selected edge provider.
 
 ## Minimum Observability
 
@@ -136,6 +146,8 @@ Pilot readiness is satisfied when:
 - public-auth smoke passes
 - private surfaces are not publicly reachable
 - edge limits are configured
+- Vault paths are populated and access-controlled
+- the go/no-go checklist is signed off
 - rollback path is rehearsed
 - partner integration docs are delivered
 - no secrets or artifacts are present in logs, screenshots, docs, or repository files

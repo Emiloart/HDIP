@@ -35,7 +35,7 @@ services:
     environment:
       DSN: postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hydra?sslmode=disable
       SECRETS_SYSTEM: ${HYDRA_SYSTEM_SECRET:-hdip_sandbox_system_secret_32_bytes}
-      URLS_SELF_ISSUER: http://127.0.0.1:4444
+      URLS_SELF_ISSUER: ${HYDRA_SELF_ISSUER_URL:-http://127.0.0.1:4444}
       URLS_LOGIN: http://127.0.0.1:3000/login
       URLS_CONSENT: http://127.0.0.1:3000/consent
       SERVE_PUBLIC_PORT: 4444
@@ -130,6 +130,7 @@ services:
     environment:
       HDIP_HOST: 0.0.0.0
       HDIP_PORT: 8080
+      HDIP_ENVIRONMENT: ${HDIP_ENVIRONMENT:-development}
       HDIP_PHASE1_DATABASE_DRIVER: pgx
       HDIP_PHASE1_DATABASE_URL: postgres://hdip:${POSTGRES_PASSWORD:-hdip_sandbox_password}@phase1-db:5432/hdip_phase1?sslmode=disable
       HDIP_TRUST_RUNTIME_HYDRA_INTROSPECTION_URL: http://hydra:4445/admin/oauth2/introspect
@@ -155,7 +156,7 @@ services:
     environment:
       HDIP_HOST: 0.0.0.0
       HDIP_PORT: 8080
-      HDIP_ENVIRONMENT: development
+      HDIP_ENVIRONMENT: ${HDIP_ENVIRONMENT:-development}
       HDIP_PUBLIC_AUTH_MODE: hydra
       HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_URL: http://hydra:4445/admin/oauth2/introspect
       HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_CLIENT_ID: ${ISSUER_API_INTROSPECTION_CLIENT_ID:-issuer-api}
@@ -186,7 +187,7 @@ services:
     environment:
       HDIP_HOST: 0.0.0.0
       HDIP_PORT: 8080
-      HDIP_ENVIRONMENT: development
+      HDIP_ENVIRONMENT: ${HDIP_ENVIRONMENT:-development}
       HDIP_PUBLIC_AUTH_MODE: hydra
       HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_URL: http://hydra:4445/admin/oauth2/introspect
       HDIP_PUBLIC_AUTH_HYDRA_INTROSPECTION_CLIENT_ID: ${VERIFIER_API_INTROSPECTION_CLIENT_ID:-verifier-api-public}

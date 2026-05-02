@@ -83,8 +83,10 @@ Do not use header attribution as a production rollback.
 
 ## Open Questions
 
-- Which edge provider or gateway will enforce pilot rate limits.
-- Whether the first pilot uses host-installed Hydra CLI or an operator container with Hydra CLI.
+- First controlled pilot edge provider is resolved by `docs/plans/active/0020-phase1-cloudflare-vault-vm-pilot-hardening.md`: Cloudflare.
+- First controlled pilot secret manager is resolved by `docs/plans/active/0020-phase1-cloudflare-vault-vm-pilot-hardening.md`: Vault KV v2.
+- First controlled pilot hosting shape is resolved by `docs/plans/active/0020-phase1-cloudflare-vault-vm-pilot-hardening.md`: single Linux VM with Docker Compose.
+- Whether the first pilot uses host-installed Hydra CLI or an operator container with Hydra CLI remains an operator workflow choice.
 - Whether later partner onboarding should become a governed service or admin console workflow.
 
 ## Implementation Sequence
